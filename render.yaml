@@ -10,12 +10,12 @@ services:
         fromService:
           type: web
           name: app-monitor-backend
-          property: url
+          property: host
       - key: REACT_APP_WS_URL
         fromService:
           type: web
           name: app-monitor-backend
-          property: url
+          property: host
           replacer:
             from: https
             to: wss
