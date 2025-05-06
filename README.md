@@ -1,89 +1,84 @@
-# Monitor de Sites
+# App Monitor
 
-Sistema de monitoramento de sites que verifica:
-- Status (up/down)
-- Certificados SSL
-- Expiração de domínios
-- Notificações por email
+Aplicação de monitoramento de sites, certificados SSL e domínios.
 
-## Requisitos
+## Estrutura do Projeto
 
-- Node.js (v14 ou superior)
-- MongoDB
-- Conta de email para envio de notificações
+```
+app-monitor/
+├── frontend/     # Aplicação React
+├── backend/      # API Node.js
+└── netlify.toml  # Configuração do Netlify
+```
+
+## Pré-requisitos
+
+- Node.js 16+
+- NPM ou Yarn
+- PostgreSQL
 
 ## Instalação
 
 1. Clone o repositório:
 ```bash
-git clone https://github.com/seu-usuario/site-monitor.git
-cd site-monitor
+git clone https://github.com/seu-usuario/app-monitor.git
+cd app-monitor
 ```
 
-2. Instale as dependências do backend:
+2. Instale as dependências:
 ```bash
-npm install
+npm run install-all
 ```
 
-3. Instale as dependências do frontend:
+## Desenvolvimento Local
+
+Para rodar o projeto localmente:
+
 ```bash
-cd frontend
-npm install
+npm run dev
 ```
 
-4. Crie um arquivo `.env` na raiz do projeto com as seguintes variáveis:
+## Deploy
+
+### Frontend (Netlify)
+
+1. Conecte seu repositório ao Netlify
+2. Configure as variáveis de ambiente:
+   - `REACT_APP_API_URL`: URL do seu backend
+
+3. O deploy será automático a cada push na branch principal
+
+### Backend (Heroku/Railway/Render)
+
+1. Escolha uma plataforma de hospedagem
+2. Configure as variáveis de ambiente:
+   - `DATABASE_URL`: URL do banco PostgreSQL
+   - `FRONTEND_URL`: URL do frontend no Netlify
+   - `NODE_ENV`: "production"
+
+3. Configure o banco de dados PostgreSQL
+
+## Variáveis de Ambiente
+
+### Frontend (.env)
+```
+REACT_APP_API_URL=http://localhost:5000
+```
+
+### Backend (.env)
 ```
 PORT=5000
-MONGODB_URI=mongodb://localhost:27017/site-monitor
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=seu-email@gmail.com
-SMTP_PASS=sua-senha-de-app
-SMTP_FROM=seu-email@gmail.com
+DATABASE_URL=postgres://usuario:senha@host:5432/banco
+FRONTEND_URL=http://localhost:3000
 ```
 
-## Executando o projeto
+## Scripts Disponíveis
 
-1. Inicie o servidor MongoDB
+- `npm run dev`: Inicia o projeto em modo desenvolvimento
+- `npm run build`: Build do frontend
+- `npm start`: Inicia o backend
+- `npm run install-all`: Instala todas as dependências
 
-2. Em um terminal, inicie o backend:
-```bash
-npm run dev:backend
-```
+## Licença
 
-3. Em outro terminal, inicie o frontend:
-```bash
-npm run dev:frontend
-```
-
-4. Acesse a aplicação em `http://localhost:3000`
-
-## Funcionalidades
-
-- Monitoramento de status dos sites (verificação a cada 5 minutos)
-- Verificação de certificados SSL
-- Verificação de expiração de domínios
-- Notificações por email para:
-  - Site fora do ar
-  - Certificado SSL próximo de expirar (30 dias)
-  - Domínio próximo de expirar (30 dias)
-- Interface moderna e responsiva
-- Dashboard com visão geral dos sites monitorados
-- Página de detalhes para cada site
-
-## Tecnologias utilizadas
-
-- Backend:
-  - Node.js
-  - Express
-  - MongoDB/Mongoose
-  - node-fetch
-  - ssl-checker
-  - whois-json
-  - nodemailer
-
-- Frontend:
-  - React
-  - Material-UI
-  - Axios
-  - React Router 
+ISC 

@@ -1,32 +1,23 @@
 {
-  "name": "site-monitor",
+  "name": "app-monitor",
   "version": "1.0.0",
-  "description": "Sistema de monitoramento de sites, certificados SSL e domínios",
+  "description": "Aplicação de monitoramento de sites",
   "main": "index.js",
   "scripts": {
-    "start": "node backend/server.js",
-    "dev:backend": "nodemon backend/server.js",
-    "dev:frontend": "cd frontend && npm start",
-    "install:all": "npm install && cd frontend && npm install"
+    "start": "cd backend && npm start",
+    "build": "cd frontend && npm install && npm run build",
+    "install-all": "npm install && cd frontend && npm install && cd ../backend && npm install",
+    "dev": "concurrently \"cd backend && npm run dev\" \"cd frontend && npm start\""
   },
+  "keywords": [
+    "monitoring",
+    "uptime",
+    "react",
+    "node"
+  ],
+  "author": "",
+  "license": "ISC",
   "dependencies": {
-    "@mui/x-charts": "^8.2.0",
-    "chart.js": "^4.4.9",
-    "cors": "^2.8.5",
-    "dns-socket": "^4.2.2",
-    "dotenv": "^16.0.3",
-    "express": "^4.18.2",
-    "node-fetch": "^2.6.9",
-    "nodemailer": "^6.9.1",
-    "react-chartjs-2": "^5.3.0",
-    "sequelize": "^6.37.7",
-    "sqlite3": "^5.1.7",
-    "ssl-checker": "^2.0.8",
-    "whois-json": "^2.0.4",
-    "ws": "^8.18.2"
-  },
-  "devDependencies": {
-    "kill-port": "^2.0.1",
-    "nodemon": "^2.0.22"
+    "concurrently": "^8.2.2"
   }
 }

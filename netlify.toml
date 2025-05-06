@@ -1,0 +1,16 @@
+[build]
+  base = "frontend"
+  command = "npm run build"
+  publish = "build"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/api/*"
+  to = "https://seu-backend.herokuapp.com/api/:splat"
+  status = 200
+  force = true
+  headers = {X-From = "Netlify"} 
