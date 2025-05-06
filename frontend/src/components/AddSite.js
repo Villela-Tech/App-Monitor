@@ -12,7 +12,11 @@ import {
   Switch,
   CircularProgress,
   useTheme,
-  Divider
+  Divider,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem
 } from '@mui/material';
 import { styled } from '@mui/material/styles';
 import { useNotification } from '../contexts/NotificationContext';
@@ -41,6 +45,7 @@ function AddSite() {
   const [formData, setFormData] = useState({
     name: '',
     url: '',
+    category: 'website',
     notifications: {
       email: '',
       downtime: true,
@@ -139,6 +144,23 @@ function AddSite() {
             placeholder="https://exemplo.com"
             helperText="Inclua o protocolo (http:// ou https://)"
           />
+
+          <FormControl fullWidth variant="outlined">
+            <InputLabel id="category-label">Categoria</InputLabel>
+            <Select
+              labelId="category-label"
+              name="category"
+              value={formData.category}
+              onChange={handleChange}
+              label="Categoria"
+            >
+              <MenuItem value="website">Website</MenuItem>
+              <MenuItem value="application">Aplicação</MenuItem>
+              <MenuItem value="api">API</MenuItem>
+              <MenuItem value="domain">Domínio</MenuItem>
+              <MenuItem value="other">Outro</MenuItem>
+            </Select>
+          </FormControl>
 
           <TextField
             required

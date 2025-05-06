@@ -22,13 +22,38 @@ const Site = sequelize.define('Site', {
       notEmpty: true
     }
   },
+  category: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    defaultValue: 'website',
+    validate: {
+      isIn: [['website', 'application', 'domain', 'api', 'other']]
+    }
+  },
   status: {
     type: DataTypes.ENUM('up', 'down', 'unknown'),
     defaultValue: 'unknown'
   },
+  responseTime: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  },
   lastCheck: {
     type: DataTypes.DATE,
     defaultValue: DataTypes.NOW
+  },
+  anomalyThreshold: {
+    type: DataTypes.INTEGER,
+    defaultValue: 1000, // Limite em ms para considerar uma anomalia
+    allowNull: false
+  },
+  averageResponseTime: {
+    type: DataTypes.FLOAT,
+    allowNull: true
+  },
+  standardDeviation: {
+    type: DataTypes.FLOAT,
+    allowNull: true
   },
   sslInfo: {
     type: DataTypes.JSON,
@@ -43,6 +68,14 @@ const Site = sequelize.define('Site', {
     defaultValue: null,
     get() {
       const rawValue = this.getDataValue('domainInfo');
+      return rawValue ? JSON.parse(JSON.stringify(rawValue)) : null;
+    }
+  },
+  dnsInfo: {
+    type: DataTypes.JSON,
+    defaultValue: null,
+    get() {
+      const rawValue = this.getDataValue('dnsInfo');
       return rawValue ? JSON.parse(JSON.stringify(rawValue)) : null;
     }
   },

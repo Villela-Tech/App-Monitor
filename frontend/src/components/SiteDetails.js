@@ -26,7 +26,11 @@ import {
   useTheme,
   FormControlLabel,
   Switch,
-  FormGroup
+  FormGroup,
+  InputLabel,
+  Select,
+  MenuItem,
+  FormControl
 } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -44,6 +48,7 @@ import DomainVerificationIcon from '@mui/icons-material/DomainVerification';
 import SecurityIcon from '@mui/icons-material/Security';
 import { alpha } from '@mui/material/styles';
 import { LineChart } from '@mui/x-charts';
+import DnsIcon from '@mui/icons-material/Dns';
 
 const StyledGrid = styled('div')(({ theme }) => ({
   display: 'grid',
@@ -109,7 +114,8 @@ function SiteDetails() {
   const [editForm, setEditForm] = useState({
     name: '',
     url: '',
-    email: ''
+    email: '',
+    category: 'website'
   });
   const [notificationSettings, setNotificationSettings] = useState({
     downtime: false,
@@ -118,6 +124,23 @@ function SiteDetails() {
   });
   const { showSuccess, showError, showInfo } = useNotification();
   const { isSmallScreen, isMobile } = useBreakpoint();
+  const [metrics, setMetrics] = useState({
+    responseTimeData: [],
+    timestamps: []
+  });
+  const [ws, setWs] = useState(null);
+  const [hasAnomaly, setHasAnomaly] = useState(false);
+
+  const fetchMetrics = useCallback(async () => {
+    try {
+      const response = await axios.get(`http://localhost:5000/api/sites/${id}/metrics`);
+      if (response.data && response.data.responseTimeData) {
+        setMetrics(response.data);
+      }
+    } catch (error) {
+      console.error('Erro ao buscar métricas:', error);
+    }
+  }, [id]);
 
   const fetchSite = useCallback(async () => {
     try {
@@ -126,7 +149,8 @@ function SiteDetails() {
       setEditForm({
         name: response.data.name,
         url: response.data.url,
-        email: response.data.notifications?.email || ''
+        email: response.data.notifications?.email || '',
+        category: response.data.category || 'website'
       });
       setNotificationSettings({
         downtime: response.data.notifications?.downtime || false,
@@ -144,7 +168,82 @@ function SiteDetails() {
 
   useEffect(() => {
     fetchSite();
-  }, [fetchSite]);
+    fetchMetrics();
+
+    const updateInterval = setInterval(() => {
+      fetchSite();
+      fetchMetrics();
+    }, 5000);
+
+    return () => clearInterval(updateInterval);
+  }, [fetchSite, fetchMetrics]);
+
+  useEffect(() => {
+    let ws = null;
+    let reconnectTimeout = null;
+    let isConnecting = false;
+    let isUnmounting = false;
+
+    const connect = () => {
+      if (isConnecting || isUnmounting) return;
+      
+      isConnecting = true;
+      ws = new WebSocket('ws://localhost:5000/ws');
+
+      ws.onopen = () => {
+        console.log('WebSocket conectado');
+        setWs(ws);
+        isConnecting = false;
+        fetchSite();
+        fetchMetrics();
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'siteUpdate' && data.siteId === parseInt(id)) {
+            setSite(prevSite => ({
+              ...prevSite,
+              ...data.data
+            }));
+            setHasAnomaly(data.data.isAnomalous);
+            fetchMetrics();
+          }
+        } catch (error) {
+          console.error('Erro ao processar mensagem do WebSocket:', error);
+        }
+      };
+
+      ws.onerror = (error) => {
+        console.error('Erro no WebSocket:', error);
+        if (!isUnmounting) {
+          setWs(null);
+          reconnectTimeout = setTimeout(connect, 5000);
+        }
+      };
+
+      ws.onclose = () => {
+        if (!isUnmounting) {
+          setWs(null);
+          if (!isConnecting) {
+            reconnectTimeout = setTimeout(connect, 5000);
+          }
+        }
+      };
+    };
+
+    connect();
+
+    return () => {
+      isUnmounting = true;
+      if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout);
+      }
+      if (ws) {
+        ws.close();
+      }
+    };
+  }, [id, fetchSite, fetchMetrics]);
 
   const handleRefresh = async () => {
     try {
@@ -243,6 +342,30 @@ function SiteDetails() {
     );
   }
 
+  const renderActions = () => (
+    <Box sx={{ mt: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <Box>
+        <Tooltip title="Editar Site">
+          <IconButton onClick={() => setOpenEditDialog(true)}>
+            <EditIcon />
+          </IconButton>
+        </Tooltip>
+        <Tooltip title="Deletar Site">
+          <IconButton color="error" onClick={handleDelete}>
+            <DeleteIcon />
+          </IconButton>
+        </Tooltip>
+      </Box>
+      <Box>
+        <Tooltip title="Configurar Notificações">
+          <IconButton size="small" onClick={() => setOpenSettingsDialog(true)}>
+            <SettingsIcon />
+          </IconButton>
+        </Tooltip>
+      </Box>
+    </Box>
+  );
+
   return (
     <ResponsiveContainer>
       <Box sx={{ mb: isSmallScreen ? 2 : 4 }}>
@@ -254,9 +377,23 @@ function SiteDetails() {
         >
           Voltar
         </Button>
-        <Typography variant={isSmallScreen ? "h5" : "h4"} component="h1" gutterBottom>
-          {site.name}
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Typography variant={isSmallScreen ? "h5" : "h4"} component="h1">
+            {site.name}
+          </Typography>
+          <Chip
+            label={site.category}
+            color="primary"
+            size={isSmallScreen ? "small" : "medium"}
+          />
+          {hasAnomaly && (
+            <Chip
+              label="Anomalia Detectada"
+              color="error"
+              size={isSmallScreen ? "small" : "medium"}
+            />
+          )}
+        </Box>
       </Box>
 
       <GridContainer container>
@@ -360,10 +497,143 @@ function SiteDetails() {
                   <Typography variant="body2" color="textSecondary">
                     Registrador: {site.domainInfo.registrar || 'Não disponível'}
                   </Typography>
+                  <Typography variant="body2" color="textSecondary">
+                    Proprietário: {site.domainInfo.owner || 'Não disponível'}
+                  </Typography>
+                  <Typography variant="body2" color="textSecondary">
+                    Email: {site.domainInfo.email || 'Não disponível'}
+                  </Typography>
+                  <Typography variant="body2" color="textSecondary">
+                    País: {site.domainInfo.country || 'Não disponível'}
+                  </Typography>
+                  <Typography variant="body2" color="textSecondary">
+                    Criado em: {formatDate(site.domainInfo.creationDate)}
+                  </Typography>
+                  <Typography variant="body2" color="textSecondary">
+                    Última atualização: {formatDate(site.domainInfo.updatedDate)}
+                  </Typography>
+                  <Divider sx={{ my: 2 }} />
+                  <Typography variant="subtitle2" gutterBottom>
+                    Nameservers:
+                  </Typography>
+                  {Array.isArray(site.domainInfo.nameservers) ? (
+                    site.domainInfo.nameservers.map((ns, index) => (
+                      <Typography key={index} variant="body2" color="textSecondary">
+                        • {ns}
+                      </Typography>
+                    ))
+                  ) : (
+                    <Typography variant="body2" color="textSecondary">
+                      Não disponível
+                    </Typography>
+                  )}
                 </>
               ) : (
                 <Alert severity="error" sx={{ mt: 1 }}>
                   Informações do domínio não disponíveis
+                </Alert>
+              )}
+            </CardContent>
+          </ResponsiveCard>
+        </StyledGridItem>
+
+        <StyledGridItem>
+          <ResponsiveCard>
+            <CardHeader 
+              title="Registros DNS"
+              titleTypography={{ variant: isSmallScreen ? 'h6' : 'h5' }}
+              avatar={<DnsIcon />}
+            />
+            <CardContent>
+              {site.dnsInfo ? (
+                <>
+                  {site.dnsInfo.a && site.dnsInfo.a.length > 0 && (
+                    <Box mb={2}>
+                      <Typography variant="subtitle2" gutterBottom>
+                        Registros A:
+                      </Typography>
+                      {site.dnsInfo.a.map((record, index) => (
+                        <Chip
+                          key={index}
+                          label={record}
+                          size="small"
+                          sx={{ m: 0.5 }}
+                        />
+                      ))}
+                    </Box>
+                  )}
+
+                  {site.dnsInfo.aaaa && site.dnsInfo.aaaa.length > 0 && (
+                    <Box mb={2}>
+                      <Typography variant="subtitle2" gutterBottom>
+                        Registros AAAA:
+                      </Typography>
+                      {site.dnsInfo.aaaa.map((record, index) => (
+                        <Chip
+                          key={index}
+                          label={record}
+                          size="small"
+                          sx={{ m: 0.5 }}
+                        />
+                      ))}
+                    </Box>
+                  )}
+
+                  {site.dnsInfo.mx && site.dnsInfo.mx.length > 0 && (
+                    <Box mb={2}>
+                      <Typography variant="subtitle2" gutterBottom>
+                        Registros MX:
+                      </Typography>
+                      {site.dnsInfo.mx.map((record, index) => (
+                        <Chip
+                          key={index}
+                          label={`${record.exchange} (${record.priority})`}
+                          size="small"
+                          sx={{ m: 0.5 }}
+                        />
+                      ))}
+                    </Box>
+                  )}
+
+                  {site.dnsInfo.ns && site.dnsInfo.ns.length > 0 && (
+                    <Box mb={2}>
+                      <Typography variant="subtitle2" gutterBottom>
+                        Registros NS:
+                      </Typography>
+                      {site.dnsInfo.ns.map((record, index) => (
+                        <Chip
+                          key={index}
+                          label={record}
+                          size="small"
+                          sx={{ m: 0.5 }}
+                        />
+                      ))}
+                    </Box>
+                  )}
+
+                  <Divider sx={{ my: 2 }} />
+                  
+                  <Typography variant="subtitle2" gutterBottom>
+                    Propagação DNS:
+                  </Typography>
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                    {site.dnsInfo.propagation.map((check, index) => (
+                      <Chip
+                        key={index}
+                        label={check.server}
+                        color={check.propagated ? 'success' : 'error'}
+                        size="small"
+                      />
+                    ))}
+                  </Box>
+
+                  <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mt: 2 }}>
+                    Última verificação: {new Date(site.dnsInfo.lastCheck).toLocaleString()}
+                  </Typography>
+                </>
+              ) : (
+                <Alert severity="error">
+                  Informações de DNS não disponíveis
                 </Alert>
               )}
             </CardContent>
@@ -443,59 +713,204 @@ function SiteDetails() {
               titleTypography={{ variant: isSmallScreen ? 'h6' : 'h5' }}
             />
             <CardContent>
-              {site.responseTime ? (
+              {site?.responseTime ? (
                 <Box sx={{ 
                   display: 'flex', 
                   flexDirection: 'column',
                   alignItems: 'center',
                   gap: 2 
                 }}>
-                  <Typography variant="h3" color={getResponseTimeColor(site.responseTime)}>
-                    {site.responseTime}
-                    <Typography component="span" variant="h6" color="textSecondary">
-                      ms
+                  <Box sx={{ position: 'relative', display: 'inline-flex', mb: 2 }}>
+                    <CircularProgress
+                      variant="determinate"
+                      value={Math.min((site.responseTime / 1000) * 100, 100)}
+                      size={120}
+                      thickness={8}
+                      sx={{
+                        color: site.responseTime < 300 ? theme.palette.success.main :
+                              site.responseTime < 1000 ? theme.palette.warning.main :
+                              theme.palette.error.main
+                      }}
+                    />
+                    <Box
+                      sx={{
+                        top: 0,
+                        left: 0,
+                        bottom: 0,
+                        right: 0,
+                        position: 'absolute',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexDirection: 'column'
+                      }}
+                    >
+                      <Typography variant="h4" component="div" color="text.primary">
+                        {site.responseTime}
+                      </Typography>
+                      <Typography variant="caption" component="div" color="text.secondary">
+                        ms
+                      </Typography>
+                    </Box>
+                  </Box>
+                  <Box sx={{ width: '100%', textAlign: 'center' }}>
+                    <Typography 
+                      variant="body1" 
+                      color={
+                        site.responseTime < 300 ? 'success.main' :
+                        site.responseTime < 1000 ? 'warning.main' :
+                        'error.main'
+                      }
+                      fontWeight="bold"
+                    >
+                      {site.responseTime < 300 ? 'Excelente' :
+                       site.responseTime < 1000 ? 'Regular' :
+                       'Lento'}
                     </Typography>
-                  </Typography>
-                  <Typography variant="body2" color="textSecondary">
-                    Última verificação: {new Date(site.lastCheck).toLocaleString()}
-                  </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                      Última verificação: {new Date(site.lastCheck).toLocaleString()}
+                    </Typography>
+                  </Box>
                 </Box>
               ) : (
-                <Typography variant="body2" color="textSecondary">
-                  Tempo de resposta não disponível
-                </Typography>
+                <Box sx={{ textAlign: 'center', py: 3 }}>
+                  <Typography variant="body1" color="text.secondary" gutterBottom>
+                    Aguardando primeira verificação...
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    O tempo de resposta será medido em breve
+                  </Typography>
+                </Box>
+              )}
+            </CardContent>
+          </ResponsiveCard>
+        </StyledGridItem>
+
+        <StyledGridItem>
+          <ResponsiveCard>
+            <CardHeader 
+              title="Histórico de Desempenho"
+              titleTypography={{ variant: isSmallScreen ? 'h6' : 'h5' }}
+            />
+            <CardContent>
+              {metrics.responseTimeData.length > 0 ? (
+                <>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    Acompanhe o desempenho do site nas últimas 24 horas
+                  </Typography>
+                  <Box sx={{ width: '100%', height: 300, position: 'relative' }}>
+                    <LineChart
+                      xAxis={[{ 
+                        data: metrics.timestamps,
+                        scaleType: 'band',
+                        label: 'Horário',
+                        tickLabelStyle: {
+                          angle: 45,
+                          textAnchor: 'start',
+                          fontSize: 12
+                        }
+                      }]}
+                      yAxis={[{
+                        label: 'Tempo (ms)',
+                        min: 0,
+                        max: Math.max(...metrics.responseTimeData.map(d => d.responseTime || 0)) + 100,
+                        tickCount: 5
+                      }]}
+                      series={[
+                        {
+                          data: metrics.responseTimeData.map(d => d.responseTime || 0),
+                          area: true,
+                          color: theme.palette.primary.main,
+                          label: 'Tempo de resposta',
+                          showMark: true,
+                          valueFormatter: (value) => `${value}ms`,
+                          curve: "natural",
+                          area: {
+                            opacity: 0.2
+                          },
+                          line: {
+                            strokeWidth: 2
+                          }
+                        }
+                      ]}
+                      height={300}
+                      margin={{ left: 60, right: 20, top: 20, bottom: 50 }}
+                      sx={{
+                        '.MuiLineElement-root': {
+                          strokeWidth: 2,
+                        },
+                        '.MuiChartsAxis-label': {
+                          fontSize: '0.875rem',
+                          fontWeight: 500
+                        },
+                        '.MuiChartsAxis-tick': {
+                          stroke: theme.palette.text.secondary
+                        },
+                        '.MuiChartsAxis-line': {
+                          stroke: theme.palette.divider,
+                          strokeWidth: 1
+                        },
+                        '.MuiChartsAxis-tickLabel': {
+                          fill: theme.palette.text.secondary
+                        }
+                      }}
+                    />
+                  </Box>
+                  <Box sx={{ 
+                    display: 'flex',
+                    justifyContent: 'center',
+                    gap: 2,
+                    mt: 3,
+                    flexWrap: 'wrap'
+                  }}>
+                    <Box sx={{ 
+                      p: 1, 
+                      borderRadius: 1, 
+                      bgcolor: alpha(theme.palette.success.main, 0.1),
+                      border: `1px solid ${theme.palette.success.main}`
+                    }}>
+                      <Typography variant="body2" color="success.main">
+                        Bom: &lt; 300ms
+                      </Typography>
+                    </Box>
+                    <Box sx={{ 
+                      p: 1, 
+                      borderRadius: 1, 
+                      bgcolor: alpha(theme.palette.warning.main, 0.1),
+                      border: `1px solid ${theme.palette.warning.main}`
+                    }}>
+                      <Typography variant="body2" color="warning.main">
+                        Regular: 300ms - 1000ms
+                      </Typography>
+                    </Box>
+                    <Box sx={{ 
+                      p: 1, 
+                      borderRadius: 1, 
+                      bgcolor: alpha(theme.palette.error.main, 0.1),
+                      border: `1px solid ${theme.palette.error.main}`
+                    }}>
+                      <Typography variant="body2" color="error.main">
+                        Ruim: &gt; 1000ms
+                      </Typography>
+                    </Box>
+                  </Box>
+                </>
+              ) : (
+                <Box sx={{ textAlign: 'center', py: 3 }}>
+                  <Typography variant="body1" color="text.secondary" gutterBottom>
+                    Coletando dados de desempenho...
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    O histórico será atualizado a cada 5 segundos
+                  </Typography>
+                </Box>
               )}
             </CardContent>
           </ResponsiveCard>
         </StyledGridItem>
       </GridContainer>
 
-      <Box sx={{ mt: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Box>
-          <Tooltip title="Atualizar Status">
-            <IconButton onClick={handleRefresh} disabled={isRefreshing}>
-              <RefreshIcon />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Editar Site">
-            <IconButton onClick={() => setOpenEditDialog(true)}>
-              <EditIcon />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Deletar Site">
-            <IconButton color="error" onClick={handleDelete}>
-              <DeleteIcon />
-            </IconButton>
-          </Tooltip>
-        </Box>
-        <Box>
-          <Tooltip title="Configurar Notificações">
-            <IconButton size="small" onClick={() => setOpenSettingsDialog(true)}>
-              <SettingsIcon />
-            </IconButton>
-          </Tooltip>
-        </Box>
-      </Box>
+      {renderActions()}
 
       <Dialog open={openEditDialog} onClose={() => setOpenEditDialog(false)}>
         <DialogTitle>Editar Site</DialogTitle>
@@ -525,6 +940,22 @@ function SiteDetails() {
             value={editForm.email}
             onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
           />
+          <FormControl fullWidth margin="dense">
+            <InputLabel id="category-label">Categoria</InputLabel>
+            <Select
+              labelId="category-label"
+              name="category"
+              value={editForm.category}
+              onChange={(e) => setEditForm({ ...editForm, category: e.target.value })}
+              label="Categoria"
+            >
+              <MenuItem value="website">Website</MenuItem>
+              <MenuItem value="application">Aplicação</MenuItem>
+              <MenuItem value="api">API</MenuItem>
+              <MenuItem value="domain">Domínio</MenuItem>
+              <MenuItem value="other">Outro</MenuItem>
+            </Select>
+          </FormControl>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setOpenEditDialog(false)}>Cancelar</Button>

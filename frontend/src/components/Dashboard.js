@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import axios from 'axios';
 import {
@@ -36,6 +36,7 @@ import SearchIcon from '@mui/icons-material/Search';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
 import WarningIcon from '@mui/icons-material/Warning';
+import AddIcon from '@mui/icons-material/Add';
 import { motion } from 'framer-motion';
 import { useNotification } from '../contexts/NotificationContext';
 import { useBreakpoint } from '../hooks/useBreakpoint';
@@ -111,11 +112,13 @@ function Dashboard() {
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [categoryFilter, setCategoryFilter] = useState('all');
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [siteToDelete, setSiteToDelete] = useState(null);
   const { isSmallScreen, isMobile } = useBreakpoint();
+  const [websocket, setWebsocket] = useState(null);
 
-  const fetchSites = async () => {
+  const fetchSites = useCallback(async () => {
     try {
       const response = await axios.get('http://localhost:5000/api/sites');
       setSites(response.data);
@@ -127,11 +130,91 @@ function Dashboard() {
       setError('Erro ao carregar sites. Por favor, tente novamente.');
       setLoading(false);
     }
-  };
+  }, [showError]);
 
+  // Atualização automática dos dados
   useEffect(() => {
+    // Primeira carga dos dados
     fetchSites();
-  }, []);
+
+    const updateInterval = setInterval(() => {
+      fetchSites();
+    }, 5000); // Atualiza a cada 5 segundos
+
+    return () => clearInterval(updateInterval);
+  }, [fetchSites]);
+
+  // Atualização via WebSocket
+  useEffect(() => {
+    let ws = null;
+    let reconnectTimeout = null;
+    let isConnecting = false;
+    let isUnmounting = false;
+
+    const connect = () => {
+      if (isConnecting || isUnmounting) return;
+      
+      isConnecting = true;
+      ws = new WebSocket('ws://localhost:5000/ws');
+
+      ws.onopen = () => {
+        console.log('WebSocket conectado');
+        setWebsocket(ws);
+        isConnecting = false;
+        // Carregar dados iniciais
+        fetchSites();
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'siteUpdate') {
+            setSites(prevSites => {
+              return prevSites.map(site => {
+                if (site.id === data.siteId) {
+                  return { ...site, ...data.data };
+                }
+                return site;
+              });
+            });
+          }
+        } catch (error) {
+          console.error('Erro ao processar mensagem do WebSocket:', error);
+        }
+      };
+
+      ws.onerror = (error) => {
+        console.error('Erro no WebSocket:', error);
+        if (!isUnmounting) {
+          setWebsocket(null);
+          // Tentar reconectar em caso de erro
+          reconnectTimeout = setTimeout(connect, 5000);
+        }
+      };
+
+      ws.onclose = () => {
+        if (!isUnmounting) {
+          setWebsocket(null);
+          // Tentar reconectar em caso de fechamento
+          if (!isConnecting) {
+            reconnectTimeout = setTimeout(connect, 5000);
+          }
+        }
+      };
+    };
+
+    connect();
+
+    return () => {
+      isUnmounting = true;
+      if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout);
+      }
+      if (ws) {
+        ws.close();
+      }
+    };
+  }, [fetchSites]);
 
   const handleRefresh = async (id, siteName) => {
     if (!id) return;
@@ -191,7 +274,8 @@ function Dashboard() {
     const matchesSearch = site.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          site.url.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = statusFilter === 'all' || site.status === statusFilter;
-    return matchesSearch && matchesStatus;
+    const matchesCategory = categoryFilter === 'all' || site.category === categoryFilter;
+    return matchesSearch && matchesStatus && matchesCategory;
   });
 
   const stats = {
@@ -226,60 +310,62 @@ function Dashboard() {
           <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>
         )}
 
-        <Grid 
-          container 
-          spacing={{ xs: 1, sm: 2 }}
-          sx={{ mb: { xs: 2, sm: 3 } }}
+        <Box 
+          sx={{ 
+            display: 'grid',
+            gridTemplateColumns: {
+              xs: '1fr',
+              sm: 'repeat(2, 1fr)',
+              md: 'repeat(4, 1fr)'
+            },
+            gap: 2,
+            mb: { xs: 2, sm: 3 }
+          }}
         >
-          <Grid item xs={12} sm={6} md={3}>
-            <StatsCard>
-              <CardContent sx={{ p: isSmallScreen ? 2 : 3 }}>
-                <Typography variant={isSmallScreen ? "subtitle1" : "h6"} gutterBottom>
-                  Total de Sites
-                </Typography>
-                <Typography variant={isSmallScreen ? "h5" : "h4"}>
-                  {stats.total}
-                </Typography>
-              </CardContent>
-            </StatsCard>
-          </Grid>
-          <Grid item xs={12} sm={6} md={3}>
-            <StatsCard>
-              <CardContent sx={{ p: isSmallScreen ? 2 : 3 }}>
-                <Typography variant={isSmallScreen ? "subtitle1" : "h6"} gutterBottom>
-                  Sites Online
-                </Typography>
-                <Typography variant={isSmallScreen ? "h5" : "h4"} color="success.main">
-                  {stats.up}
-                </Typography>
-              </CardContent>
-            </StatsCard>
-          </Grid>
-          <Grid item xs={12} sm={6} md={3}>
-            <StatsCard>
-              <CardContent sx={{ p: isSmallScreen ? 2 : 3 }}>
-                <Typography variant={isSmallScreen ? "subtitle1" : "h6"} gutterBottom>
-                  Sites Offline
-                </Typography>
-                <Typography variant={isSmallScreen ? "h5" : "h4"} color="error.main">
-                  {stats.down}
-                </Typography>
-              </CardContent>
-            </StatsCard>
-          </Grid>
-          <Grid item xs={12} sm={6} md={3}>
-            <StatsCard>
-              <CardContent sx={{ p: isSmallScreen ? 2 : 3 }}>
-                <Typography variant={isSmallScreen ? "subtitle1" : "h6"} gutterBottom>
-                  Alertas SSL
-                </Typography>
-                <Typography variant={isSmallScreen ? "h5" : "h4"} color="warning.main">
-                  {stats.warning}
-                </Typography>
-              </CardContent>
-            </StatsCard>
-          </Grid>
-        </Grid>
+          <StatsCard>
+            <CardContent sx={{ p: isSmallScreen ? 2 : 3 }}>
+              <Typography variant={isSmallScreen ? "subtitle1" : "h6"} gutterBottom>
+                Total de Sites
+              </Typography>
+              <Typography variant={isSmallScreen ? "h5" : "h4"}>
+                {stats.total}
+              </Typography>
+            </CardContent>
+          </StatsCard>
+
+          <StatsCard>
+            <CardContent sx={{ p: isSmallScreen ? 2 : 3 }}>
+              <Typography variant={isSmallScreen ? "subtitle1" : "h6"} gutterBottom>
+                Sites Online
+              </Typography>
+              <Typography variant={isSmallScreen ? "h5" : "h4"} color="success.main">
+                {stats.up}
+              </Typography>
+            </CardContent>
+          </StatsCard>
+
+          <StatsCard>
+            <CardContent sx={{ p: isSmallScreen ? 2 : 3 }}>
+              <Typography variant={isSmallScreen ? "subtitle1" : "h6"} gutterBottom>
+                Sites Offline
+              </Typography>
+              <Typography variant={isSmallScreen ? "h5" : "h4"} color="error.main">
+                {stats.down}
+              </Typography>
+            </CardContent>
+          </StatsCard>
+
+          <StatsCard>
+            <CardContent sx={{ p: isSmallScreen ? 2 : 3 }}>
+              <Typography variant={isSmallScreen ? "subtitle1" : "h6"} gutterBottom>
+                Alertas SSL
+              </Typography>
+              <Typography variant={isSmallScreen ? "h5" : "h4"} color="warning.main">
+                {stats.warning}
+              </Typography>
+            </CardContent>
+          </StatsCard>
+        </Box>
 
         <SearchContainer sx={{ mb: { xs: 2, sm: 3 } }}>
           <TextField
@@ -307,6 +393,21 @@ function Dashboard() {
               <MenuItem value="all">Todos</MenuItem>
               <MenuItem value="up">Online</MenuItem>
               <MenuItem value="down">Offline</MenuItem>
+            </Select>
+          </FormControl>
+          <FormControl sx={{ minWidth: 120 }}>
+            <InputLabel>Categoria</InputLabel>
+            <Select
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+              label="Categoria"
+            >
+              <MenuItem value="all">Todas</MenuItem>
+              <MenuItem value="website">Website</MenuItem>
+              <MenuItem value="application">Aplicação</MenuItem>
+              <MenuItem value="api">API</MenuItem>
+              <MenuItem value="domain">Domínio</MenuItem>
+              <MenuItem value="other">Outro</MenuItem>
             </Select>
           </FormControl>
         </SearchContainer>
@@ -378,14 +479,6 @@ function Dashboard() {
                     borderColor: 'divider',
                     pt: 2
                   }}>
-                    <Tooltip title="Atualizar">
-                      <IconButton
-                        size={isSmallScreen ? "small" : "medium"}
-                        onClick={() => handleRefresh(site.id, site.name)}
-                      >
-                        <RefreshIcon />
-                      </IconButton>
-                    </Tooltip>
                     <Tooltip title="Detalhes">
                       <IconButton
                         size={isSmallScreen ? "small" : "medium"}

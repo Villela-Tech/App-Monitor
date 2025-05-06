@@ -3,203 +3,342 @@ const sslChecker = require('ssl-checker');
 const whois = require('whois-json');
 const nodemailer = require('nodemailer');
 const Site = require('../models/site.model');
+const History = require('../models/history.model');
+const { Op } = require('sequelize');
+const domainService = require('./domain.service');
 
 class MonitorService {
   constructor() {
-    this.transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: process.env.SMTP_PORT,
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS
-      }
-    });
+    this.websockets = new Map();
+    this.monitoringInterval = null;
+    this.updateInterval = 60000; // 1 minuto
+    this.siteDowntime = new Map(); // Armazenar informações de downtime
+    this.startMonitoring();
   }
 
-  async checkSiteStatus(url) {
-    try {
-      const response = await fetch(url);
-      const responseTime = response.headers.get('x-response-time');
-      return {
-        status: response.ok ? 'up' : 'down',
-        responseTime: responseTime ? parseInt(responseTime) : null
-      };
-    } catch (error) {
-      console.error(`Erro ao verificar status do site ${url}:`, error);
-      return { status: 'down', responseTime: null };
+  async startMonitoring() {
+    console.log('Iniciando monitoramento automático...');
+
+    // Primeira verificação imediata
+    await this.checkAllSites();
+
+    // Configurar intervalo de monitoramento
+    if (this.monitoringInterval) {
+      clearInterval(this.monitoringInterval);
     }
+
+    this.monitoringInterval = setInterval(async () => {
+      await this.checkAllSites();
+    }, this.updateInterval);
   }
 
-  async checkSSL(hostname) {
+  async checkAllSites() {
     try {
-      const sslInfo = await sslChecker(hostname);
-      const daysRemaining = Math.floor((new Date(sslInfo.validTo) - new Date()) / (1000 * 60 * 60 * 24));
-      return {
-        validTo: sslInfo.validTo,
-        issuer: sslInfo.issuer,
-        daysRemaining
-      };
-    } catch (error) {
-      console.error(`Erro ao verificar SSL para ${hostname}:`, error);
-      return null;
-    }
-  }
-
-  extractDomain(url) {
-    try {
-      const { hostname } = new URL(url);
-      // Remove 'www.' se existir
-      return hostname.replace(/^www\./, '');
-    } catch (error) {
-      console.error('Erro ao extrair domínio:', error);
-      return null;
-    }
-  }
-
-  parseBrDomainDate(dateStr) {
-    if (!dateStr) return null;
-    
-    // Formato comum para domínios .br: "20250722"
-    if (/^\d{8}$/.test(dateStr)) {
-      const year = dateStr.substring(0, 4);
-      const month = dateStr.substring(4, 6);
-      const day = dateStr.substring(6, 8);
-      return new Date(`${year}-${month}-${day}`);
-    }
-    
-    return new Date(dateStr);
-  }
-
-  async checkDomain(url) {
-    try {
-      const domain = this.extractDomain(url);
-      if (!domain) return null;
-
-      console.log(`Verificando informações do domínio: ${domain}`);
-      const domainInfo = await whois(domain);
+      console.log('Verificando todos os sites...');
+      const sites = await Site.findAll();
       
-      console.log('Informações WHOIS recebidas:', JSON.stringify(domainInfo, null, 2));
-
-      let expiryDate = null;
-      let registrar = 'Não disponível';
-
-      // Tratamento específico para domínios .br
-      if (domain.endsWith('.br')) {
-        expiryDate = this.parseBrDomainDate(domainInfo.expires);
-        registrar = domainInfo.owner || domainInfo.registrar || 'Não disponível';
-      } else {
-        // Tratamento para outros domínios
-        const possibleExpiryFields = [
-          'registryExpiryDate',
-          'expirationDate',
-          'registrarRegistrationExpirationDate',
-          'expires'
-        ];
-
-        for (const field of possibleExpiryFields) {
-          if (domainInfo[field]) {
-            expiryDate = new Date(domainInfo[field]);
-            if (!isNaN(expiryDate.getTime())) break;
-          }
-        }
-
-        registrar = domainInfo.registrar || 
-                   domainInfo.registrarName || 
-                   domainInfo['Registrar'] ||
-                   'Não disponível';
+      for (const site of sites) {
+        const result = await this.monitorSite(site);
+        this.broadcastUpdate(site.id, result);
       }
-
-      if (!expiryDate || isNaN(expiryDate.getTime())) {
-        console.error(`Data de expiração inválida para ${domain}. Campos disponíveis:`, 
-          Object.keys(domainInfo).filter(k => domainInfo[k]));
-        return null;
-      }
-
-      const daysRemaining = Math.floor((expiryDate - new Date()) / (1000 * 60 * 60 * 24));
-
-      return {
-        expiryDate: expiryDate.toISOString(),
-        registrar,
-        daysRemaining
-      };
+      console.log('Verificação completa de todos os sites');
     } catch (error) {
-      console.error(`Erro ao verificar domínio ${url}:`, error);
-      return null;
-    }
-  }
-
-  async sendNotification(site, type, message) {
-    if (!site.notifications?.[type]) return;
-
-    try {
-      await this.transporter.sendMail({
-        from: process.env.SMTP_FROM,
-        to: site.notifications.email,
-        subject: `[Site Monitor] Alerta para ${site.name}`,
-        text: message
-      });
-    } catch (error) {
-      console.error('Erro ao enviar notificação:', error);
+      console.error('Erro ao verificar sites:', error);
     }
   }
 
   async monitorSite(site) {
     try {
-      console.log(`Iniciando monitoramento do site: ${site.name} (${site.url})`);
+      console.log(`Monitorando site: ${site.name} (${site.url})`);
       
-      const { status, responseTime } = await this.checkSiteStatus(site.url);
-      const hostname = new URL(site.url).hostname;
-      
-      console.log(`Status do site ${site.name}: ${status}`);
-      const sslInfo = await this.checkSSL(hostname);
-      console.log(`Informações SSL obtidas para ${site.name}`);
-      
-      const domainInfo = await this.checkDomain(site.url);
-      console.log(`Informações de domínio obtidas para ${site.name}:`, domainInfo);
+      const { status, responseTime, error, statusCode } = await this.checkSiteStatus(site.url);
+      console.log(`Status: ${status}, Tempo de resposta: ${responseTime}ms, Status Code: ${statusCode}${error ? `, Erro: ${error}` : ''}`);
 
+      // Gerenciar downtime
+      const wasDown = site.status === 'down';
+      const isDown = status === 'down';
+      
+      if (!wasDown && isDown) {
+        // Site acabou de cair
+        this.siteDowntime.set(site.id, {
+          startTime: new Date(),
+          notified: false
+        });
+        await this.sendNotification(site, 'down');
+      } else if (wasDown && !isDown) {
+        // Site voltou ao ar
+        const downtime = this.siteDowntime.get(site.id);
+        if (downtime) {
+          const duration = new Date() - downtime.startTime;
+          const durationMinutes = Math.floor(duration / 60000);
+          await this.sendNotification(site, 'up', durationMinutes);
+          this.siteDowntime.delete(site.id);
+        }
+      }
+
+      // Calcular estatísticas
+      const { average, standardDeviation } = await this.calculateStatistics(site.id);
+      
+      // Verificar anomalias
+      const isAnomalous = responseTime ? this.isAnomaly(responseTime, average, standardDeviation, site.anomalyThreshold) : false;
+
+      // Salvar histórico
+      await History.create({
+        siteId: site.id,
+        status,
+        responseTime,
+        statusCode,
+        timestamp: new Date(),
+        error: error || null
+      });
+
+      // Preparar dados de atualização
       const updates = {
         status,
         responseTime,
         lastCheck: new Date(),
-        sslInfo,
-        domainInfo
+        averageResponseTime: average,
+        standardDeviation,
+        lastError: error || null,
+        lastStatusCode: statusCode
       };
 
-      // Verificar e enviar notificações
-      if (status === 'down' && site.status === 'up') {
-        await this.sendNotification(site, 'downtime', `O site ${site.name} está fora do ar!`);
+      // Verificar SSL
+      try {
+        const hostname = new URL(site.url).hostname;
+        const ssl = await sslChecker(hostname);
+        updates.sslInfo = {
+          valid: ssl.valid,
+          validTo: ssl.validTo,
+          daysRemaining: Math.floor((new Date(ssl.validTo) - new Date()) / (1000 * 60 * 60 * 24))
+        };
+      } catch (error) {
+        console.error(`Erro ao verificar SSL:`, error);
+        updates.sslInfo = null;
       }
 
-      if (sslInfo && sslInfo.daysRemaining <= 30) {
-        await this.sendNotification(site, 'sslExpiry', 
-          `O certificado SSL de ${site.name} irá expirar em ${sslInfo.daysRemaining} dias.`);
+      // Verificar informações do domínio e DNS
+      try {
+        const [domainInfo, dnsInfo] = await Promise.all([
+          domainService.getDomainInfo(site.url),
+          domainService.getDNSInfo(site.url)
+        ]);
+
+        if (domainInfo) {
+          updates.domainInfo = domainInfo;
+        }
+        if (dnsInfo) {
+          updates.dnsInfo = dnsInfo;
+        }
+      } catch (error) {
+        console.error(`Erro ao verificar informações do domínio:`, error);
+        updates.domainInfo = null;
+        updates.dnsInfo = null;
       }
 
-      if (domainInfo && domainInfo.daysRemaining <= 30) {
-        await this.sendNotification(site, 'domainExpiry',
-          `O domínio ${site.name} irá expirar em ${domainInfo.daysRemaining} dias.`);
-      }
-
+      // Atualizar site no banco de dados
       await site.update(updates);
-      return site;
+      await site.save();
+
+      return {
+        ...updates,
+        isAnomalous,
+        name: site.name,
+        url: site.url,
+        category: site.category
+      };
     } catch (error) {
       console.error(`Erro ao monitorar site ${site.name}:`, error);
-      return site;
+      return {
+        status: 'error',
+        error: error.message,
+        lastCheck: new Date(),
+        name: site.name,
+        url: site.url,
+        category: site.category
+      };
     }
   }
 
-  async startMonitoring() {
-    console.log('Iniciando serviço de monitoramento...');
-    setInterval(async () => {
+  setWebSocket(ws, req) {
+    const clientId = req.headers['sec-websocket-key'];
+    
+    // Verificar se já existe uma conexão ativa para este cliente
+    if (this.websockets.has(clientId)) {
+      const oldWs = this.websockets.get(clientId);
+      if (oldWs.readyState === 1) {
+        console.log(`Fechando conexão antiga para o cliente ${clientId}`);
+        oldWs.close();
+      }
+    }
+
+    // Configurar eventos da nova conexão
+    ws.isAlive = true;
+    ws.clientId = clientId;
+
+    // Armazenar nova conexão
+    this.websockets.set(clientId, ws);
+    console.log(`Nova conexão estabelecida para o cliente ${clientId}. Total de conexões: ${this.websockets.size}`);
+
+    // Enviar dados atuais imediatamente
+    this.checkAllSites();
+
+    // Configurar eventos
+    ws.on('close', () => {
+      console.log(`Conexão fechada para o cliente ${clientId}`);
+      this.cleanupConnection(clientId);
+    });
+
+    ws.on('error', (error) => {
+      console.error(`Erro na conexão WebSocket para o cliente ${clientId}:`, error);
+      this.cleanupConnection(clientId);
+    });
+  }
+
+  broadcastUpdate(siteId, data) {
+    const message = JSON.stringify({
+      type: 'siteUpdate',
+      siteId,
+      data
+    });
+
+    for (const [clientId, ws] of this.websockets.entries()) {
       try {
-        const sites = await Site.findAll();
-        for (const site of sites) {
-          await this.monitorSite(site);
+        if (ws.readyState === 1) {
+          ws.send(message);
+        } else {
+          this.cleanupConnection(clientId);
         }
       } catch (error) {
-        console.error('Erro no ciclo de monitoramento:', error);
+        console.error(`Erro ao enviar mensagem para cliente ${clientId}:`, error);
+        this.cleanupConnection(clientId);
       }
-    }, 5 * 60 * 1000); // Verificar a cada 5 minutos
+    }
+  }
+
+  cleanupConnection(clientId) {
+    const ws = this.websockets.get(clientId);
+    if (ws) {
+      this.websockets.delete(clientId);
+      console.log(`Limpando conexão para o cliente ${clientId}`);
+    }
+  }
+
+  async checkSiteStatus(url) {
+    try {
+      // Fazer 3 tentativas antes de considerar o site como down
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const controller = new AbortController();
+          const timeout = setTimeout(() => {
+            controller.abort();
+          }, 15000); // 15 segundos de timeout
+
+          const startTime = Date.now();
+          const response = await fetch(url, {
+            signal: controller.signal,
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            },
+            redirect: 'follow' // Seguir redirecionamentos
+          });
+          
+          clearTimeout(timeout);
+          const endTime = Date.now();
+          const responseTime = endTime - startTime;
+
+          // Site está respondendo
+          return {
+            status: 'up',
+            responseTime,
+            statusCode: response.status
+          };
+        } catch (error) {
+          if (attempt === 3) {
+            throw error; // Lançar erro após 3 tentativas
+          }
+          await new Promise(resolve => setTimeout(resolve, 2000)); // Esperar 2 segundos entre tentativas
+        }
+      }
+    } catch (error) {
+      console.error(`Erro ao verificar status do site ${url} após 3 tentativas:`, error.message);
+      return { 
+        status: 'down', 
+        responseTime: 15000, // Valor padrão alto quando o site está fora do ar
+        error: error.message || 'Erro de conexão'
+      };
+    }
+  }
+
+  async calculateStatistics(siteId) {
+    const last24Hours = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const history = await History.findAll({
+      where: {
+        siteId,
+        timestamp: {
+          [Op.gte]: last24Hours
+        },
+        responseTime: {
+          [Op.not]: null
+        }
+      }
+    });
+
+    if (history.length > 0) {
+      const responseTimes = history.map(h => h.responseTime);
+      const average = responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length;
+      
+      const squareDiffs = responseTimes.map(value => {
+        const diff = value - average;
+        return diff * diff;
+      });
+      const standardDeviation = Math.sqrt(squareDiffs.reduce((a, b) => a + b, 0) / responseTimes.length);
+
+      return { average, standardDeviation };
+    }
+
+    return { average: null, standardDeviation: null };
+  }
+
+  isAnomaly(responseTime, average, standardDeviation, threshold) {
+    if (!average || !standardDeviation) return false;
+    const zScore = Math.abs(responseTime - average) / standardDeviation;
+    return zScore > 2 || responseTime > threshold; // Z-score > 2 ou acima do threshold
+  }
+
+  async sendNotification(site, status, downtimeDuration = null) {
+    try {
+      if (!site.notificationEmail) return;
+
+      const transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+          user: process.env.EMAIL_USER,
+          pass: process.env.EMAIL_PASS
+        }
+      });
+
+      let subject, text;
+      if (status === 'down') {
+        subject = `[ALERTA] Site ${site.name} está fora do ar`;
+        text = `O site ${site.name} (${site.url}) está inacessível.\nÚltima verificação: ${new Date().toLocaleString()}`;
+      } else {
+        subject = `[RECUPERADO] Site ${site.name} está de volta ao ar`;
+        text = `O site ${site.name} (${site.url}) está novamente acessível.\nTempo total fora do ar: ${downtimeDuration} minutos\nHorário de recuperação: ${new Date().toLocaleString()}`;
+      }
+
+      const mailOptions = {
+        from: process.env.EMAIL_USER,
+        to: site.notificationEmail,
+        subject,
+        text
+      };
+
+      await transporter.sendMail(mailOptions);
+      console.log(`Notificação enviada para ${site.name} - Status: ${status}`);
+    } catch (error) {
+      console.error(`Erro ao enviar notificação para ${site.name}:`, error);
+    }
   }
 }
 
