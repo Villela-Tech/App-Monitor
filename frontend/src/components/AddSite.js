@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import api from '../config/api';
 import {
   Container,
   Paper,
@@ -16,7 +17,9 @@ import {
   FormControl,
   InputLabel,
   Select,
-  MenuItem
+  MenuItem,
+  ToggleButton,
+  ToggleButtonGroup
 } from '@mui/material';
 import { styled } from '@mui/material/styles';
 import { useNotification } from '../contexts/NotificationContext';
@@ -45,6 +48,7 @@ function AddSite() {
   const [formData, setFormData] = useState({
     name: '',
     url: '',
+    type: 'url',
     category: 'website',
     notifications: {
       email: '',
@@ -73,6 +77,16 @@ function AddSite() {
     }
   };
 
+  const handleTypeChange = (event, newType) => {
+    if (newType !== null) {
+      setFormData(prev => ({
+        ...prev,
+        type: newType,
+        category: newType === 'ip' ? 'ip' : prev.category
+      }));
+    }
+  };
+
   const handleSwitchChange = (name) => (event) => {
     setFormData(prev => ({
       ...prev,
@@ -92,15 +106,12 @@ function AddSite() {
 
     try {
       setLoading(true);
-      const response = await axios.post('http://localhost:5000/api/sites', formData);
-      showSuccess('Site adicionado com sucesso!');
-      navigate(`/site/${response.data.id}`);
+      const response = await axios.post(api.sites.create(), formData);
+      showSuccess(formData.type === 'ip' ? 'IP adicionado com sucesso!' : 'Site adicionado com sucesso!');
+      navigate('/');
     } catch (error) {
-      console.error('Erro ao adicionar site:', error);
-      showError(
-        error.response?.data || 
-        'Erro ao adicionar site. Por favor, verifique os dados e tente novamente.'
-      );
+      console.error('Erro ao adicionar site/IP:', error);
+      showError(`Erro ao adicionar ${formData.type === 'ip' ? 'IP' : 'site'}. Por favor, tente novamente.`);
     } finally {
       setLoading(false);
     }
@@ -118,15 +129,26 @@ function AddSite() {
             Voltar
           </Button>
           <Typography variant="h5" component="h1">
-            Adicionar Novo Site
+            Adicionar Novo {formData.type === 'ip' ? 'IP' : 'Site'}
           </Typography>
         </Box>
 
         <Form onSubmit={handleSubmit}>
+          <ToggleButtonGroup
+            value={formData.type}
+            exclusive
+            onChange={handleTypeChange}
+            fullWidth
+            sx={{ mb: 2 }}
+          >
+            <ToggleButton value="url">Website/Aplicação</ToggleButton>
+            <ToggleButton value="ip">Endereço IP</ToggleButton>
+          </ToggleButtonGroup>
+
           <TextField
             required
             fullWidth
-            label="Nome do Site"
+            label="Nome"
             name="name"
             value={formData.name}
             onChange={handleChange}
@@ -136,31 +158,34 @@ function AddSite() {
           <TextField
             required
             fullWidth
-            label="URL"
+            label={formData.type === 'ip' ? 'Endereço IP' : 'URL'}
             name="url"
             value={formData.url}
             onChange={handleChange}
             variant="outlined"
-            placeholder="https://exemplo.com"
-            helperText="Inclua o protocolo (http:// ou https://)"
+            placeholder={formData.type === 'ip' ? '192.168.0.1' : 'https://exemplo.com'}
+            helperText={formData.type === 'ip' ? 'Digite um endereço IP válido' : 'Inclua o protocolo (http:// ou https://)'}
           />
 
-          <FormControl fullWidth variant="outlined">
-            <InputLabel id="category-label">Categoria</InputLabel>
-            <Select
-              labelId="category-label"
-              name="category"
-              value={formData.category}
-              onChange={handleChange}
-              label="Categoria"
-            >
-              <MenuItem value="website">Website</MenuItem>
-              <MenuItem value="application">Aplicação</MenuItem>
-              <MenuItem value="api">API</MenuItem>
-              <MenuItem value="domain">Domínio</MenuItem>
-              <MenuItem value="other">Outro</MenuItem>
-            </Select>
-          </FormControl>
+          {formData.type === 'url' && (
+            <FormControl fullWidth variant="outlined">
+              <InputLabel id="category-label">Categoria</InputLabel>
+              <Select
+                labelId="category-label"
+                name="category"
+                value={formData.category}
+                onChange={handleChange}
+                label="Categoria"
+              >
+                <MenuItem value="website">Website</MenuItem>
+                <MenuItem value="application">Aplicação</MenuItem>
+                <MenuItem value="api">API</MenuItem>
+                <MenuItem value="domain">Domínio</MenuItem>
+                <MenuItem value="server">Servidor</MenuItem>
+                <MenuItem value="other">Outro</MenuItem>
+              </Select>
+            </FormControl>
+          )}
 
           <TextField
             required
@@ -188,30 +213,34 @@ function AddSite() {
                   color="primary"
                 />
               }
-              label="Notificar quando o site estiver fora do ar"
+              label={`Notificar quando o ${formData.type === 'ip' ? 'IP' : 'site'} estiver fora do ar`}
             />
 
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={formData.notifications.sslExpiry}
-                  onChange={handleSwitchChange('sslExpiry')}
-                  color="primary"
+            {formData.type === 'url' && (
+              <>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={formData.notifications.sslExpiry}
+                      onChange={handleSwitchChange('sslExpiry')}
+                      color="primary"
+                    />
+                  }
+                  label="Notificar sobre expiração do certificado SSL"
                 />
-              }
-              label="Notificar sobre expiração do certificado SSL"
-            />
 
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={formData.notifications.domainExpiry}
-                  onChange={handleSwitchChange('domainExpiry')}
-                  color="primary"
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={formData.notifications.domainExpiry}
+                      onChange={handleSwitchChange('domainExpiry')}
+                      color="primary"
+                    />
+                  }
+                  label="Notificar sobre expiração do domínio"
                 />
-              }
-              label="Notificar sobre expiração do domínio"
-            />
+              </>
+            )}
           </Box>
 
           <Box sx={{ mt: 2 }}>
@@ -223,7 +252,7 @@ function AddSite() {
               startIcon={loading ? <CircularProgress size={20} /> : <AddIcon />}
               fullWidth
             >
-              {loading ? 'Adicionando...' : 'Adicionar Site'}
+              {loading ? 'Adicionando...' : `Adicionar ${formData.type === 'ip' ? 'IP' : 'Site'}`}
             </Button>
           </Box>
         </Form>

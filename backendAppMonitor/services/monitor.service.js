@@ -5,7 +5,8 @@ const nodemailer = require('nodemailer');
 const Site = require('../models/site.model');
 const History = require('../models/history.model');
 const { Op } = require('sequelize');
-const domainService = require('./domain.service');
+const DomainService = require('./domain.service');
+const IPService = require('./ip.service');
 
 class MonitorService {
   constructor() {
@@ -13,7 +14,8 @@ class MonitorService {
     this.monitoringInterval = null;
     this.updateInterval = 60000; // 1 minuto
     this.siteDowntime = new Map(); // Armazenar informações de downtime
-    this.startMonitoring();
+    this.domainService = new DomainService();
+    this.ipService = new IPService();
   }
 
   async startMonitoring() {
@@ -49,24 +51,33 @@ class MonitorService {
 
   async monitorSite(site) {
     try {
-      console.log(`Monitorando site: ${site.name} (${site.url})`);
+      console.log(`Monitorando ${site.type === 'ip' ? 'IP' : 'site'}: ${site.name} (${site.url})`);
       
-      const { status, responseTime, error, statusCode } = await this.checkSiteStatus(site.url);
-      console.log(`Status: ${status}, Tempo de resposta: ${responseTime}ms, Status Code: ${statusCode}${error ? `, Erro: ${error}` : ''}`);
+      let statusResult;
+      
+      // Verificar se é um IP ou URL
+      if (site.type === 'ip') {
+        statusResult = await this.ipService.pingIP(site.url);
+      } else {
+        statusResult = await this.checkSiteStatus(site.url);
+      }
+      
+      const { status, responseTime, error, statusCode } = statusResult;
+      console.log(`Status: ${status}, Tempo de resposta: ${responseTime}ms${statusCode ? `, Status Code: ${statusCode}` : ''}${error ? `, Erro: ${error}` : ''}`);
 
       // Gerenciar downtime
       const wasDown = site.status === 'down';
       const isDown = status === 'down';
       
       if (!wasDown && isDown) {
-        // Site acabou de cair
+        // Site/IP acabou de cair
         this.siteDowntime.set(site.id, {
           startTime: new Date(),
           notified: false
         });
         await this.sendNotification(site, 'down');
       } else if (wasDown && !isDown) {
-        // Site voltou ao ar
+        // Site/IP voltou ao ar
         const downtime = this.siteDowntime.get(site.id);
         if (downtime) {
           const duration = new Date() - downtime.startTime;
@@ -87,7 +98,7 @@ class MonitorService {
         siteId: site.id,
         status,
         responseTime,
-        statusCode,
+        statusCode: statusCode || null,
         timestamp: new Date(),
         error: error || null
       });
@@ -100,40 +111,56 @@ class MonitorService {
         averageResponseTime: average,
         standardDeviation,
         lastError: error || null,
-        lastStatusCode: statusCode
+        lastStatusCode: statusCode || null
       };
 
-      // Verificar SSL
-      try {
-        const hostname = new URL(site.url).hostname;
-        const ssl = await sslChecker(hostname);
-        updates.sslInfo = {
-          valid: ssl.valid,
-          validTo: ssl.validTo,
-          daysRemaining: Math.floor((new Date(ssl.validTo) - new Date()) / (1000 * 60 * 60 * 24))
-        };
-      } catch (error) {
-        console.error(`Erro ao verificar SSL:`, error);
-        updates.sslInfo = null;
-      }
-
-      // Verificar informações do domínio e DNS
-      try {
-        const [domainInfo, dnsInfo] = await Promise.all([
-          domainService.getDomainInfo(site.url),
-          domainService.getDNSInfo(site.url)
-        ]);
-
-        if (domainInfo) {
-          updates.domainInfo = domainInfo;
+      // Processar informações específicas baseadas no tipo (URL ou IP)
+      if (site.type === 'ip') {
+        // Obter informações sobre o IP
+        try {
+          const ipInfo = await this.ipService.getIPInfo(site.url);
+          updates.ipInfo = ipInfo;
+          
+          // Verificar portas abertas (opcional, pode ser pesado para o monitoramento contínuo)
+          // const portInfo = await this.ipService.checkPorts(site.url);
+          // updates.ipInfo = { ...updates.ipInfo, ports: portInfo.ports };
+        } catch (error) {
+          console.error(`Erro ao obter informações do IP:`, error);
+          updates.ipInfo = null;
         }
-        if (dnsInfo) {
-          updates.dnsInfo = dnsInfo;
+      } else {
+        // Verificar SSL para URLs
+        try {
+          const hostname = new URL(site.url).hostname;
+          const ssl = await sslChecker(hostname);
+          updates.sslInfo = {
+            valid: ssl.valid,
+            validTo: ssl.validTo,
+            daysRemaining: Math.floor((new Date(ssl.validTo) - new Date()) / (1000 * 60 * 60 * 24))
+          };
+        } catch (error) {
+          console.error(`Erro ao verificar SSL:`, error);
+          updates.sslInfo = null;
         }
-      } catch (error) {
-        console.error(`Erro ao verificar informações do domínio:`, error);
-        updates.domainInfo = null;
-        updates.dnsInfo = null;
+
+        // Verificar informações do domínio e DNS para URLs
+        try {
+          const [domainInfo, dnsInfo] = await Promise.all([
+            this.domainService.getDomainInfo(site.url),
+            this.domainService.getDNSInfo(site.url)
+          ]);
+
+          if (domainInfo) {
+            updates.domainInfo = domainInfo;
+          }
+          if (dnsInfo) {
+            updates.dnsInfo = dnsInfo;
+          }
+        } catch (error) {
+          console.error(`Erro ao verificar informações do domínio:`, error);
+          updates.domainInfo = null;
+          updates.dnsInfo = null;
+        }
       }
 
       // Atualizar site no banco de dados
@@ -145,17 +172,19 @@ class MonitorService {
         isAnomalous,
         name: site.name,
         url: site.url,
-        category: site.category
+        category: site.category,
+        type: site.type
       };
     } catch (error) {
-      console.error(`Erro ao monitorar site ${site.name}:`, error);
+      console.error(`Erro ao monitorar ${site.type === 'ip' ? 'IP' : 'site'} ${site.name}:`, error);
       return {
         status: 'error',
         error: error.message,
         lastCheck: new Date(),
         name: site.name,
         url: site.url,
-        category: site.category
+        category: site.category,
+        type: site.type
       };
     }
   }
@@ -232,7 +261,7 @@ class MonitorService {
           const controller = new AbortController();
           const timeout = setTimeout(() => {
             controller.abort();
-          }, 15000); // 15 segundos de timeout
+          }, 5000); // Reduzido para 5 segundos de timeout
 
           const startTime = Date.now();
           const response = await fetch(url, {
@@ -240,7 +269,8 @@ class MonitorService {
             headers: {
               'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
             },
-            redirect: 'follow' // Seguir redirecionamentos
+            redirect: 'follow', // Seguir redirecionamentos
+            timeout: 5000 // Timeout adicional para o fetch
           });
           
           clearTimeout(timeout);
@@ -257,14 +287,14 @@ class MonitorService {
           if (attempt === 3) {
             throw error; // Lançar erro após 3 tentativas
           }
-          await new Promise(resolve => setTimeout(resolve, 2000)); // Esperar 2 segundos entre tentativas
+          await new Promise(resolve => setTimeout(resolve, 1000)); // Reduzido para 1 segundo entre tentativas
         }
       }
     } catch (error) {
       console.error(`Erro ao verificar status do site ${url} após 3 tentativas:`, error.message);
       return { 
         status: 'down', 
-        responseTime: 15000, // Valor padrão alto quando o site está fora do ar
+        responseTime: 5000, // Reduzido para 5 segundos quando o site está fora do ar
         error: error.message || 'Erro de conexão'
       };
     }
@@ -342,4 +372,4 @@ class MonitorService {
   }
 }
 
-module.exports = new MonitorService(); 
+module.exports = MonitorService; 

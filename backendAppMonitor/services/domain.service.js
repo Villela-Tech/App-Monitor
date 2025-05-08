@@ -225,4 +225,4 @@ class DomainService {
   }
 }
 
-module.exports = new DomainService(); 
+module.exports = DomainService; 

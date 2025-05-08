@@ -4,16 +4,16 @@ const WebSocket = require('ws');
 require('dotenv').config();
 const sequelize = require('./config/database');
 const { Op } = require('sequelize');
-const monitorService = require('./services/monitor.service');
 const { Site, History } = require('./models/associations');
 const initDatabase = require('./migrations/init');
 
 const app = express();
 const port = process.env.PORT || 5000;
+let monitorService = null;
 
 // Middleware
 app.use(cors({
-  origin: 'http://localhost:3000', // Frontend URL
+  origin: ['http://localhost:3000', 'http://172.16.105.12:3000', 'http://localhost:5000', 'http://172.16.105.12:5000'], // Frontend URLs
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   credentials: true
 }));
@@ -24,7 +24,19 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Rotas
+// Inicializar banco de dados e iniciar servidor
+async function startServer() {
+  try {
+    // Inicializar banco de dados
+    await initDatabase();
+    console.log('Banco de dados inicializado com sucesso!');
+
+    // Importar MonitorService após a inicialização do banco de dados
+    const MonitorService = require('./services/monitor.service');
+    monitorService = new MonitorService();
+    app.locals.monitorService = monitorService;
+
+    // Configurar rotas após inicialização do monitorService
 const sitesRouter = require('./routes/sites');
 app.use('/api/sites', sitesRouter);
 
@@ -69,8 +81,8 @@ app.get('/api/sites/:id/metrics', async (req, res) => {
       
       if (hourlyData.has(hourKey)) {
         const data = hourlyData.get(hourKey);
-        // Se o site estiver fora do ar, usar o valor máximo (15000ms)
-        const responseTimeValue = h.status === 'down' ? 15000 : (h.responseTime || 15000);
+            // Se o site estiver fora do ar, usar o valor máximo (5000ms)
+            const responseTimeValue = h.status === 'down' ? 5000 : (h.responseTime || 5000);
         data.sum += responseTimeValue;
         data.count += 1;
       }
@@ -106,6 +118,10 @@ app.get('/api/sites/:id/metrics', async (req, res) => {
 // Rota para verificar site manualmente
 app.post('/api/sites/:id/check', async (req, res) => {
   try {
+        if (!monitorService) {
+          return res.status(503).json({ error: 'Serviço de monitoramento não está disponível' });
+        }
+
     const site = await Site.findByPk(req.params.id);
     if (!site) {
       return res.status(404).json({ error: 'Site não encontrado' });
@@ -125,9 +141,8 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Erro interno do servidor' });
 });
 
-// Inicializar banco de dados antes de iniciar o servidor
-initDatabase().then(() => {
-  const server = app.listen(port, () => {
+    // Iniciar servidor HTTP
+  const server = app.listen(port, '0.0.0.0', () => {
     console.log(`Servidor rodando na porta ${port}`);
   });
 
@@ -143,7 +158,15 @@ initDatabase().then(() => {
     monitorService.setWebSocket(ws, req);
   });
 
-}).catch(error => {
+    // Iniciar monitoramento após o servidor estar pronto
+    await monitorService.startMonitoring();
+    console.log('Monitoramento iniciado com sucesso!');
+
+  } catch (error) {
   console.error('Erro ao iniciar servidor:', error);
   process.exit(1);
-}); 
+  }
+}
+
+// Iniciar servidor
+startServer(); 

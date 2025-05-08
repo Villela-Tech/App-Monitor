@@ -14,6 +14,7 @@ import MonitorHeartIcon from '@mui/icons-material/MonitorHeart';
 import AddIcon from '@mui/icons-material/Add';
 import Brightness4Icon from '@mui/icons-material/Brightness4';
 import Brightness7Icon from '@mui/icons-material/Brightness7';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { useTheme } from '../contexts/ThemeContext';
 
 function Navbar() {
@@ -23,60 +24,52 @@ function Navbar() {
   return (
     <AppBar 
       position="static" 
-      elevation={darkMode ? 0 : 1}
+      elevation={0}
       sx={{
-        backdropFilter: 'blur(8px)',
-        backgroundColor: darkMode 
-          ? 'rgba(18, 18, 18, 0.8)' 
-          : muiTheme.palette.primary.main,
-        color: darkMode ? undefined : '#fff',
+        backdropFilter: 'blur(12px)',
+        WebkitBackdropFilter: 'blur(12px)',
+        background: 'rgba(18, 24, 28, 0.85)',
+        color: '#fff',
+        boxShadow: 'none',
+        height: 64,
+        zIndex: 1000
       }}
     >
-      <Toolbar>
-        <MonitorHeartIcon sx={{ mr: 2 }} />
+      <Toolbar sx={{ minHeight: 64, px: { xs: 2, sm: 4 } }}>
+        <MonitorHeartIcon sx={{ mr: 2, fontSize: 28, color: '#fff' }} />
         <Typography 
           variant="h6" 
           component="div" 
           sx={{ 
             flexGrow: 1,
-            fontWeight: 500
+            fontWeight: 700,
+            letterSpacing: 0.5,
+            fontFamily: 'Inter, Roboto, Segoe UI, Arial'
           }}
         >
           <RouterLink to="/" style={{ color: 'inherit', textDecoration: 'none' }}>
             Monitor de Sites
           </RouterLink>
         </Typography>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Tooltip title={darkMode ? "Modo Claro" : "Modo Escuro"}>
-            <IconButton 
-              onClick={toggleTheme} 
-              sx={{ 
-                color: darkMode ? undefined : '#fff',
-                '&:hover': {
-                  backgroundColor: darkMode 
-                    ? 'rgba(255, 255, 255, 0.1)' 
-                    : 'rgba(255, 255, 255, 0.2)'
-                }
-              }}
-            >
-              {darkMode ? <Brightness7Icon /> : <Brightness4Icon />}
-            </IconButton>
-          </Tooltip>
+        <Box sx={{ display: 'flex', alignItems: 'center' }}>
           <Button
-            variant={darkMode ? "text" : "outlined"}
+            variant="contained"
             component={RouterLink}
             to="/add"
-            startIcon={<AddIcon />}
+            startIcon={<ArrowBackIcon sx={{ transform: 'rotate(180deg)' }} />}
             sx={{
-              color: darkMode ? undefined : '#fff',
-              borderColor: darkMode ? undefined : 'rgba(255, 255, 255, 0.5)',
-              borderRadius: 2,
+              color: '#fff',
+              background: '#6c63ff',
+              fontWeight: 700,
+              borderRadius: 50,
+              px: 3,
+              py: 1,
+              boxShadow: 'none',
+              textTransform: 'none',
               '&:hover': {
-                backgroundColor: darkMode 
-                  ? 'rgba(255, 255, 255, 0.1)' 
-                  : 'rgba(255, 255, 255, 0.2)',
-                borderColor: darkMode ? undefined : 'rgba(255, 255, 255, 0.8)',
-              },
+                background: '#5a52d5',
+                boxShadow: 'none'
+              }
             }}
           >
             Adicionar Site

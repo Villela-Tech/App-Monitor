@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import axios from 'axios';
+import api from '../config/api';
 import {
   Container,
   Grid,
@@ -37,9 +38,14 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
 import WarningIcon from '@mui/icons-material/Warning';
 import AddIcon from '@mui/icons-material/Add';
+import PublicIcon from '@mui/icons-material/Public';
 import { motion } from 'framer-motion';
 import { useNotification } from '../contexts/NotificationContext';
 import { useBreakpoint } from '../hooks/useBreakpoint';
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
+import HighlightOffIcon from '@mui/icons-material/HighlightOff';
+import ShieldIcon from '@mui/icons-material/Shield';
+import ListAltIcon from '@mui/icons-material/ListAlt';
 
 const MotionContainer = styled(motion.div)({
   display: 'flex',
@@ -48,11 +54,15 @@ const MotionContainer = styled(motion.div)({
 });
 
 const StatsCard = styled(Card)(({ theme }) => ({
-  backgroundColor: theme.palette.mode === 'dark' 
-    ? 'rgba(255, 255, 255, 0.05)' 
-    : 'rgba(25, 118, 210, 0.05)',
-  backdropFilter: 'blur(10px)',
-  borderRadius: 16
+  background: 'rgba(20, 28, 36, 0.95)',
+  color: '#fff',
+  borderRadius: 16,
+  boxShadow: 'none',
+  height: '100%',
+  display: 'flex',
+  alignItems: 'center',
+  padding: theme.spacing(2, 3),
+  border: '1px solid rgba(255,255,255,0.05)',
 }));
 
 const GridItem = styled(Grid)(({ theme }) => ({
@@ -66,13 +76,20 @@ const GridItem = styled(Grid)(({ theme }) => ({
 
 const StyledCard = styled(Card)(({ theme }) => ({
   height: '100%',
-  backgroundColor: theme.palette.background.paper,
-  borderRadius: 16,
+  background: 'rgba(20, 28, 33, 0.85)',
+  backdropFilter: 'blur(12px) saturate(180%)',
+  WebkitBackdropFilter: 'blur(12px) saturate(180%)',
+  color: '#fff',
+  borderRadius: 20,
+  boxShadow: '0 4px 20px 0 rgba(0, 0, 0, 0.25)',
+  border: '1px solid rgba(255,255,255,0.06)',
+  position: 'relative',
+  overflow: 'hidden',
+  transition: 'all 0.25s ease',
   '&:hover': {
-    transform: 'translateY(-4px)',
-    boxShadow: theme.shadows[8]
-  },
-  transition: 'all 0.3s ease-in-out'
+    transform: 'translateY(-5px)',
+    boxShadow: '0 6px 25px 0 rgba(0, 0, 0, 0.3)',
+  }
 }));
 
 const StatusIndicator = styled('div')(({ color }) => ({
@@ -85,10 +102,10 @@ const StatusIndicator = styled('div')(({ color }) => ({
 
 const ResponsiveGrid = styled('div')(({ theme }) => ({
   display: 'grid',
-  gap: theme.spacing(3),
+  gap: theme.spacing(2.5),
   gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
   [theme.breakpoints.up('xl')]: {
-    gridTemplateColumns: 'repeat(4, 1fr)'
+    gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))'
   }
 }));
 
@@ -117,10 +134,11 @@ function Dashboard() {
   const [siteToDelete, setSiteToDelete] = useState(null);
   const { isSmallScreen, isMobile } = useBreakpoint();
   const [websocket, setWebsocket] = useState(null);
+  const [typeFilter, setTypeFilter] = useState('all');
 
   const fetchSites = useCallback(async () => {
     try {
-      const response = await axios.get('http://localhost:5000/api/sites');
+      const response = await axios.get(api.sites.list());
       setSites(response.data);
       setLoading(false);
       setError(null);
@@ -155,7 +173,7 @@ function Dashboard() {
       if (isConnecting || isUnmounting) return;
       
       isConnecting = true;
-      ws = new WebSocket('ws://localhost:5000/ws');
+      ws = new WebSocket(api.websocket.connect());
 
       ws.onopen = () => {
         console.log('WebSocket conectado');
@@ -217,15 +235,12 @@ function Dashboard() {
   }, [fetchSites]);
 
   const handleRefresh = async (id, siteName) => {
-    if (!id) return;
     try {
-      showInfo(`Atualizando status de ${siteName}...`);
-      await axios.post(`http://localhost:5000/api/sites/${id}/check`);
-      await fetchSites();
-      showSuccess(`Status de ${siteName} atualizado com sucesso!`);
-    } catch (err) {
-      console.error('Erro ao atualizar site:', err);
-      showError(`Erro ao atualizar ${siteName}. Por favor, tente novamente.`);
+      await axios.post(api.sites.check(id));
+      showSuccess(`Verificação iniciada para ${siteName}`);
+    } catch (error) {
+      console.error('Erro ao verificar site:', error);
+      showError('Erro ao verificar site');
     }
   };
 
@@ -235,16 +250,15 @@ function Dashboard() {
   };
 
   const handleDeleteConfirm = async () => {
-    if (!siteToDelete) return;
     try {
-      await axios.delete(`http://localhost:5000/api/sites/${siteToDelete.id}`);
-      showSuccess(`Site ${siteToDelete.name} deletado com sucesso!`);
+      await axios.delete(api.sites.delete(siteToDelete.id));
+      setSites(sites.filter(site => site.id !== siteToDelete.id));
       setDeleteDialogOpen(false);
       setSiteToDelete(null);
-      await fetchSites();
-    } catch (err) {
-      console.error('Erro ao deletar site:', err);
-      showError(`Erro ao deletar ${siteToDelete.name}. Por favor, tente novamente.`);
+      showSuccess('Site deletado com sucesso');
+    } catch (error) {
+      console.error('Erro ao deletar site:', error);
+      showError('Erro ao deletar site');
     }
   };
 
@@ -275,14 +289,30 @@ function Dashboard() {
                          site.url.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = statusFilter === 'all' || site.status === statusFilter;
     const matchesCategory = categoryFilter === 'all' || site.category === categoryFilter;
-    return matchesSearch && matchesStatus && matchesCategory;
+    const matchesType = typeFilter === 'all' || site.type === typeFilter;
+    return matchesSearch && matchesStatus && matchesCategory && matchesType;
   });
 
   const stats = {
     total: sites.length,
     up: sites.filter(s => s.status === 'up').length,
     down: sites.filter(s => s.status === 'down').length,
-    warning: sites.filter(s => s.sslInfo?.daysRemaining <= 30).length
+    warning: sites.filter(s => s.sslInfo?.daysRemaining <= 30).length,
+    ips: sites.filter(s => s.type === 'ip').length
+  };
+
+  // Função para obter o favicon de um site ou ícone para IP
+  const getFavicon = (url, type) => {
+    if (type === 'ip') {
+      return "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23b0b8c1'%3E%3Cpath d='M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z'/%3E%3C/svg%3E";
+    }
+    
+    try {
+      const hostname = new URL(url).hostname;
+      return `https://www.google.com/s2/favicons?domain=${hostname}&sz=64`;
+    } catch (e) {
+      return null;
+    }
   };
 
   if (loading) {
@@ -296,9 +326,23 @@ function Dashboard() {
   return (
     <Container 
       sx={{ 
-        mt: { xs: 2, sm: 3, md: 4 }, 
+        mt: { xs: 0, sm: 0, md: 0 }, 
         mb: { xs: 2, sm: 3, md: 4 },
-        px: { xs: 1, sm: 2, md: 3 }
+        px: { xs: 1, sm: 2, md: 3 },
+        pt: { xs: 3, sm: 4, md: 5 },
+        position: 'relative',
+        minHeight: '100vh',
+        '::before': {
+          content: '""',
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          zIndex: -1,
+          background: 'radial-gradient(circle at 60% 20%, #1e3f4a22 0%, transparent 60%), radial-gradient(circle at 20% 80%, #12324222 0%, transparent 70%)',
+          pointerEvents: 'none',
+        }
       }}
     >
       <MotionContainer
@@ -318,186 +362,330 @@ function Dashboard() {
               sm: 'repeat(2, 1fr)',
               md: 'repeat(4, 1fr)'
             },
-            gap: 2,
-            mb: { xs: 2, sm: 3 }
+            gap: { xs: 2, md: 3 },
+            mb: { xs: 3, sm: 4 }
           }}
         >
           <StatsCard>
-            <CardContent sx={{ p: isSmallScreen ? 2 : 3 }}>
-              <Typography variant={isSmallScreen ? "subtitle1" : "h6"} gutterBottom>
-                Total de Sites
+            <Box sx={{ mr: 2, color: '#7b8a99', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 40, height: 40 }}>
+              <ListAltIcon sx={{ fontSize: 28 }} />
+            </Box>
+            <Box>
+              <Typography variant="body2" sx={{ color: '#7b8a99', mb: 0.5 }}>
+                Total de Sites/IPs
               </Typography>
-              <Typography variant={isSmallScreen ? "h5" : "h4"}>
+              <Typography variant="h4" sx={{ fontWeight: 700 }}>
                 {stats.total}
               </Typography>
-            </CardContent>
+            </Box>
           </StatsCard>
 
           <StatsCard>
-            <CardContent sx={{ p: isSmallScreen ? 2 : 3 }}>
-              <Typography variant={isSmallScreen ? "subtitle1" : "h6"} gutterBottom>
+            <Box sx={{ mr: 2, color: '#1aa053', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 40, height: 40, borderRadius: '50%', bgcolor: 'rgba(26, 160, 83, 0.1)' }}>
+              <CheckCircleOutlineIcon sx={{ fontSize: 28 }} />
+            </Box>
+            <Box>
+              <Typography variant="body2" sx={{ color: '#7b8a99', mb: 0.5 }}>
                 Sites Online
               </Typography>
-              <Typography variant={isSmallScreen ? "h5" : "h4"} color="success.main">
+              <Typography variant="h4" sx={{ fontWeight: 700, color: '#1aa053' }}>
                 {stats.up}
               </Typography>
-            </CardContent>
+            </Box>
           </StatsCard>
 
           <StatsCard>
-            <CardContent sx={{ p: isSmallScreen ? 2 : 3 }}>
-              <Typography variant={isSmallScreen ? "subtitle1" : "h6"} gutterBottom>
+            <Box sx={{ mr: 2, color: '#d63939', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 40, height: 40, borderRadius: '50%', bgcolor: 'rgba(214, 57, 57, 0.1)' }}>
+              <HighlightOffIcon sx={{ fontSize: 28 }} />
+            </Box>
+            <Box>
+              <Typography variant="body2" sx={{ color: '#7b8a99', mb: 0.5 }}>
                 Sites Offline
               </Typography>
-              <Typography variant={isSmallScreen ? "h5" : "h4"} color="error.main">
+              <Typography variant="h4" sx={{ fontWeight: 700, color: '#d63939' }}>
                 {stats.down}
               </Typography>
-            </CardContent>
+            </Box>
           </StatsCard>
 
           <StatsCard>
-            <CardContent sx={{ p: isSmallScreen ? 2 : 3 }}>
-              <Typography variant={isSmallScreen ? "subtitle1" : "h6"} gutterBottom>
+            <Box sx={{ mr: 2, color: '#f59f00', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 40, height: 40, borderRadius: '50%', bgcolor: 'rgba(245, 159, 0, 0.1)' }}>
+              <ShieldIcon sx={{ fontSize: 28 }} />
+            </Box>
+            <Box>
+              <Typography variant="body2" sx={{ color: '#7b8a99', mb: 0.5 }}>
                 Alertas SSL
               </Typography>
-              <Typography variant={isSmallScreen ? "h5" : "h4"} color="warning.main">
+              <Typography variant="h4" sx={{ fontWeight: 700, color: '#f59f00' }}>
                 {stats.warning}
               </Typography>
-            </CardContent>
+            </Box>
           </StatsCard>
         </Box>
 
-        <SearchContainer sx={{ mb: { xs: 2, sm: 3 } }}>
-          <TextField
-            placeholder="Pesquisar sites..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            sx={{ flexGrow: 1 }}
-            size={isSmallScreen ? "small" : "medium"}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <SearchIcon />
-                </InputAdornment>
-              ),
-            }}
-          />
-          <FormControl sx={{ minWidth: isMobile ? '100%' : 120 }}>
-            <InputLabel>Status</InputLabel>
-            <Select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              label="Status"
-              size={isSmallScreen ? "small" : "medium"}
-            >
-              <MenuItem value="all">Todos</MenuItem>
-              <MenuItem value="up">Online</MenuItem>
-              <MenuItem value="down">Offline</MenuItem>
-            </Select>
-          </FormControl>
-          <FormControl sx={{ minWidth: 120 }}>
-            <InputLabel>Categoria</InputLabel>
-            <Select
-              value={categoryFilter}
-              onChange={(e) => setCategoryFilter(e.target.value)}
-              label="Categoria"
-            >
-              <MenuItem value="all">Todas</MenuItem>
-              <MenuItem value="website">Website</MenuItem>
-              <MenuItem value="application">Aplicação</MenuItem>
-              <MenuItem value="api">API</MenuItem>
-              <MenuItem value="domain">Domínio</MenuItem>
-              <MenuItem value="other">Outro</MenuItem>
-            </Select>
-          </FormControl>
-        </SearchContainer>
+        <Box sx={{ 
+          backgroundColor: 'rgba(20, 28, 36, 0.95)', 
+          borderRadius: 30, 
+          mb: 4,
+          border: '1px solid rgba(255,255,255,0.05)',
+          display: 'flex',
+          alignItems: 'center',
+          p: { xs: 1.5, sm: 2 },
+          boxShadow: '0 4px 20px 0 rgba(0, 0, 0, 0.2)',
+        }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', flexGrow: 1, pl: 1.5 }}>
+            <SearchIcon sx={{ mr: 1.5, color: '#7b8a99' }} />
+            <TextField
+              placeholder="Pesquisar sites..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              variant="standard"
+              fullWidth
+              InputProps={{
+                disableUnderline: true,
+                sx: { 
+                  color: '#fff',
+                  fontSize: '1rem',
+                  '& input::placeholder': {
+                    color: '#7b8a99',
+                    opacity: 1
+                  }
+                }
+              }}
+            />
+          </Box>
+          <Box sx={{ display: 'flex', gap: 2, ml: 2 }}>
+            <Box>
+              <Typography variant="body2" sx={{ color: '#7b8a99', fontSize: '0.75rem', mb: 0.5 }}>
+                Status
+              </Typography>
+              <Select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                displayEmpty
+                variant="standard"
+                disableUnderline
+                sx={{ 
+                  color: '#fff',
+                  fontSize: '0.875rem',
+                  '& .MuiSelect-select': { 
+                    paddingBottom: 0,
+                    display: 'flex',
+                    alignItems: 'center'
+                  },
+                  '& .MuiSvgIcon-root': {
+                    color: '#7b8a99'
+                  }
+                }}
+                MenuProps={{
+                  PaperProps: {
+                    sx: {
+                      bgcolor: 'rgba(30, 40, 50, 0.95)',
+                      color: '#fff',
+                      border: '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: 1
+                    }
+                  }
+                }}
+              >
+                <MenuItem value="all">Todos</MenuItem>
+                <MenuItem value="up">Online</MenuItem>
+                <MenuItem value="down">Offline</MenuItem>
+              </Select>
+            </Box>
+            <Box>
+              <Typography variant="body2" sx={{ color: '#7b8a99', fontSize: '0.75rem', mb: 0.5 }}>
+                Categoria
+              </Typography>
+              <Select
+                value={categoryFilter}
+                onChange={(e) => setCategoryFilter(e.target.value)}
+                displayEmpty
+                variant="standard"
+                disableUnderline
+                sx={{ 
+                  color: '#fff',
+                  fontSize: '0.875rem',
+                  '& .MuiSelect-select': { 
+                    paddingBottom: 0,
+                    display: 'flex',
+                    alignItems: 'center'
+                  },
+                  '& .MuiSvgIcon-root': {
+                    color: '#7b8a99'
+                  }
+                }}
+                MenuProps={{
+                  PaperProps: {
+                    sx: {
+                      bgcolor: 'rgba(30, 40, 50, 0.95)',
+                      color: '#fff',
+                      border: '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: 1
+                    }
+                  }
+                }}
+              >
+                <MenuItem value="all">Todas</MenuItem>
+                <MenuItem value="website">Website</MenuItem>
+                <MenuItem value="application">Aplicação</MenuItem>
+                <MenuItem value="api">API</MenuItem>
+                <MenuItem value="domain">Domínio</MenuItem>
+                <MenuItem value="other">Outro</MenuItem>
+              </Select>
+            </Box>
+            <Box>
+              <Typography variant="body2" sx={{ color: '#7b8a99', fontSize: '0.75rem', mb: 0.5 }}>
+                Tipo
+              </Typography>
+              <Select
+                value={typeFilter}
+                onChange={(e) => setTypeFilter(e.target.value)}
+                displayEmpty
+                variant="standard"
+                disableUnderline
+                sx={{ 
+                  color: '#fff',
+                  fontSize: '0.875rem',
+                  '& .MuiSelect-select': { 
+                    paddingBottom: 0,
+                    display: 'flex',
+                    alignItems: 'center'
+                  },
+                  '& .MuiSvgIcon-root': {
+                    color: '#7b8a99'
+                  }
+                }}
+                MenuProps={{
+                  PaperProps: {
+                    sx: {
+                      bgcolor: 'rgba(30, 40, 50, 0.95)',
+                      color: '#fff',
+                      border: '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: 1
+                    }
+                  }
+                }}
+              >
+                <MenuItem value="all">Todos</MenuItem>
+                <MenuItem value="url">Sites</MenuItem>
+                <MenuItem value="ip">IPs</MenuItem>
+              </Select>
+            </Box>
+          </Box>
+        </Box>
 
         <ResponsiveGrid>
           {filteredSites.map((site) => (
             <motion.div
               key={site.id}
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ duration: 0.3 }}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4 }}
             >
               <StyledCard>
-                <CardContent sx={{ p: isSmallScreen ? 2 : 3 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-                    <StatusIndicator color={getStatusColor(site.status)} />
+                <CardContent sx={{ p: isSmallScreen ? 2.5 : 3, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minHeight: 180 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 1, width: '100%' }}>
+                    <Box 
+                      component="img"
+                      src={getFavicon(site.url, site.type)}
+                      alt=""
+                      onError={(e) => {
+                        e.target.onerror = null;
+                        e.target.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23b0b8c1'%3E%3Cpath d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z'/%3E%3C/svg%3E";
+                      }}
+                      sx={{ 
+                        width: 32, 
+                        height: 32, 
+                        mr: 1.5,
+                        borderRadius: '8px',
+                        backgroundColor: 'rgba(255,255,255,0.1)',
+                        padding: '2px'
+                      }}
+                    />
                     <Typography 
-                      variant={isSmallScreen ? "subtitle1" : "h6"} 
+                      variant={isSmallScreen ? 'subtitle1' : 'h6'} 
                       component="div"
                       noWrap
-                      sx={{ flex: 1 }}
+                      sx={{ fontWeight: 700, flex: 1 }}
                     >
                       {site.name}
                     </Typography>
                   </Box>
                   <Typography 
-                    color="textSecondary" 
+                    color="#b0b8c1" 
                     sx={{ 
-                      wordBreak: 'break-all',
-                      mb: 2,
-                      fontSize: isSmallScreen ? '0.875rem' : '1rem'
+                      wordBreak: 'break-all', 
+                      mb: 2, 
+                      fontSize: isSmallScreen ? '0.85rem' : '0.95rem', 
+                      fontWeight: 400 
                     }}
                   >
                     {site.url}
                   </Typography>
-                  <Box sx={{ 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    gap: 0.5, 
-                    flexWrap: 'wrap',
-                    mb: 2
-                  }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%', mb: 1 }}>
                     <Chip
-                      icon={getStatusIcon(site.status)}
+                      icon={<span style={{ 
+                        width: 10, 
+                        height: 10, 
+                        backgroundColor: site.status === 'up' ? '#19c37d' : '#ff3b3b', 
+                        borderRadius: '50%',
+                        display: 'inline-block'
+                      }} />}
                       label={site.status.toUpperCase()}
-                      color={site.status === 'up' ? 'success' : 'error'}
-                      size={isSmallScreen ? "small" : "medium"}
+                      sx={{
+                        bgcolor: 'rgba(34, 38, 43, 0.95)',
+                        color: site.status === 'up' ? '#19c37d' : '#ff3b3b',
+                        fontWeight: 700,
+                        px: 1.5,
+                        py: 0.5,
+                        fontSize: '0.8rem',
+                        borderRadius: 1.5,
+                        height: 24
+                      }}
+                      size="small"
                     />
-                    {site.sslInfo && site.sslInfo.daysRemaining && (
-                      <Chip
-                        label={`SSL: ${site.sslInfo.daysRemaining} dias`}
-                        color={site.sslInfo.daysRemaining <= 30 ? 'warning' : 'success'}
-                        size={isSmallScreen ? "small" : "medium"}
-                      />
-                    )}
-                    {site.responseTime && (
-                      <Chip
-                        label={`${site.responseTime}ms`}
-                        color={site.responseTime < 300 ? 'success' : 'warning'}
-                        size={isSmallScreen ? "small" : "medium"}
-                      />
-                    )}
-                  </Box>
-                  <Box sx={{ 
-                    display: 'flex', 
-                    justifyContent: 'flex-end', 
-                    gap: 1,
-                    borderTop: 1,
-                    borderColor: 'divider',
-                    pt: 2
-                  }}>
-                    <Tooltip title="Detalhes">
+                    <Box>
                       <IconButton
-                        size={isSmallScreen ? "small" : "medium"}
+                        size="small"
+                        aria-label="Ver detalhes"
                         component={RouterLink}
                         to={`/site/${site.id}`}
+                        sx={{ 
+                          color: 'rgba(255,255,255,0.7)', 
+                          '&:hover': { color: '#fff', bgcolor: 'rgba(255,255,255,0.1)' },
+                          padding: 0.5,
+                          mr: 0.5
+                        }}
                       >
-                        <VisibilityIcon />
+                        <VisibilityIcon fontSize="small" />
                       </IconButton>
-                    </Tooltip>
-                    <Tooltip title="Deletar">
                       <IconButton
-                        size={isSmallScreen ? "small" : "medium"}
+                        size="small"
+                        aria-label="Deletar site"
                         onClick={() => handleDeleteClick(site)}
-                        color="error"
+                        sx={{ 
+                          color: 'rgba(255,255,255,0.7)', 
+                          '&:hover': { color: '#ff5252', bgcolor: 'rgba(255,0,0,0.1)' },
+                          padding: 0.5
+                        }}
                       >
-                        <DeleteIcon />
+                        <DeleteIcon fontSize="small" />
                       </IconButton>
-                    </Tooltip>
+                    </Box>
                   </Box>
+                  <Typography
+                    variant="h5"
+                    sx={{
+                      fontWeight: 700,
+                      color: site.responseTime > 1000 ? '#ffd600' : '#fff',
+                      mt: 0.5,
+                      fontSize: isSmallScreen ? '1.8rem' : '2rem',
+                      letterSpacing: 0
+                    }}
+                  >
+                    {site.responseTime}ms
+                  </Typography>
                 </CardContent>
               </StyledCard>
             </motion.div>

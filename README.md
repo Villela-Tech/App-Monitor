@@ -7,15 +7,15 @@ Aplicação de monitoramento de sites, certificados SSL e domínios.
 ```
 app-monitor/
 ├── frontend/     # Aplicação React
-├── backend/      # API Node.js
-└── netlify.toml  # Configuração do Netlify
+├── backendAppMonitor/      # API Node.js
+└── ecosystem.config.js  # Configuração PM2
 ```
 
 ## Pré-requisitos
 
 - Node.js 16+
 - NPM ou Yarn
-- PostgreSQL
+- MySQL (ou SQLite como alternativa)
 
 ## Instalação
 
@@ -27,57 +27,77 @@ cd app-monitor
 
 2. Instale as dependências:
 ```bash
-npm run install-all
+cd frontend && npm install
+cd ../backendAppMonitor && npm install
 ```
+
+## Configuração do Banco de Dados
+
+### MySQL (Recomendado)
+A aplicação está configurada para usar MySQL com as seguintes credenciais:
+
+```
+Host: isp-apache-ded-333.intesys.io
+Usuário: c21sqlmonitor
+Senha: cEDLp3t5hmQZ_
+Banco: c21sqlmonitor
+```
+
+### Migração de SQLite para MySQL
+
+Se você estava usando SQLite anteriormente, siga os passos no arquivo `backendAppMonitor/MIGRATION_GUIDE.md` para migrar seus dados.
+
+Para executar a migração:
+
+```bash
+cd backendAppMonitor
+npm run migrate
+```
+
+### Voltar para SQLite (caso necessário)
+
+Para usar SQLite em vez de MySQL, edite o arquivo `backendAppMonitor/config/database.js` e altere a variável `dbDialect` para 'sqlite'.
 
 ## Desenvolvimento Local
 
 Para rodar o projeto localmente:
 
 ```bash
-npm run dev
+# Terminal 1 - Backend
+cd backendAppMonitor
+npm start
+
+# Terminal 2 - Frontend
+cd frontend
+npm start
 ```
 
-## Deploy
+## Deploy com PM2
 
-### Frontend (Netlify)
+Use o arquivo ecosystem.config.js para deploy com PM2:
 
-1. Conecte seu repositório ao Netlify
-2. Configure as variáveis de ambiente:
-   - `REACT_APP_API_URL`: URL do seu backend
-
-3. O deploy será automático a cada push na branch principal
-
-### Backend (Heroku/Railway/Render)
-
-1. Escolha uma plataforma de hospedagem
-2. Configure as variáveis de ambiente:
-   - `DATABASE_URL`: URL do banco PostgreSQL
-   - `FRONTEND_URL`: URL do frontend no Netlify
-   - `NODE_ENV`: "production"
-
-3. Configure o banco de dados PostgreSQL
+```bash
+pm2 start ecosystem.config.js
+```
 
 ## Variáveis de Ambiente
 
-### Frontend (.env)
+### Backend
 ```
-REACT_APP_API_URL=http://localhost:5000
-```
-
-### Backend (.env)
-```
+DB_DIALECT=mysql
+DB_HOST=isp-apache-ded-333.intesys.io
+DB_PORT=3306
+DB_NAME=c21sqlmonitor
+DB_USER=c21sqlmonitor
+DB_PASSWORD=cEDLp3t5hmQZ_
 PORT=5000
-DATABASE_URL=postgres://usuario:senha@host:5432/banco
-FRONTEND_URL=http://localhost:3000
+NODE_ENV=production
 ```
 
 ## Scripts Disponíveis
 
-- `npm run dev`: Inicia o projeto em modo desenvolvimento
-- `npm run build`: Build do frontend
-- `npm start`: Inicia o backend
-- `npm run install-all`: Instala todas as dependências
+- `npm start`: Inicia o backend/frontend
+- `npm run migrate`: Migra dados de SQLite para MySQL
 
 ## Licença
 

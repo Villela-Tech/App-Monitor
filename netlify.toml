@@ -3,6 +3,9 @@
   command = "npm run build"
   publish = "build"
 
+[build.environment]
+  REACT_APP_API_URL = "http://172.16.105.12:5000"
+
 [[redirects]]
   from = "/*"
   to = "/index.html"
@@ -10,7 +13,7 @@
 
 [[redirects]]
   from = "/api/*"
-  to = "https://seu-backend.herokuapp.com/api/:splat"
+  to = "http://172.16.105.12:5000/api/:splat"
   status = 200
   force = true
   headers = {X-From = "Netlify"} 

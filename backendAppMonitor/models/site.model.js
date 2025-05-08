@@ -11,9 +11,13 @@ const Site = sequelize.define('Site', {
     type: DataTypes.STRING,
     allowNull: false,
     validate: {
-      notEmpty: true,
-      isUrl: true
+      notEmpty: true
     }
+  },
+  type: {
+    type: DataTypes.ENUM('url', 'ip'),
+    allowNull: false,
+    defaultValue: 'url'
   },
   name: {
     type: DataTypes.STRING,
@@ -27,7 +31,7 @@ const Site = sequelize.define('Site', {
     allowNull: false,
     defaultValue: 'website',
     validate: {
-      isIn: [['website', 'application', 'domain', 'api', 'other']]
+      isIn: [['website', 'application', 'domain', 'api', 'server', 'ip', 'other']]
     }
   },
   status: {
@@ -76,6 +80,14 @@ const Site = sequelize.define('Site', {
     defaultValue: null,
     get() {
       const rawValue = this.getDataValue('dnsInfo');
+      return rawValue ? JSON.parse(JSON.stringify(rawValue)) : null;
+    }
+  },
+  ipInfo: {
+    type: DataTypes.JSON,
+    defaultValue: null,
+    get() {
+      const rawValue = this.getDataValue('ipInfo');
       return rawValue ? JSON.parse(JSON.stringify(rawValue)) : null;
     }
   },

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import api from '../config/api';
 import {
   Container,
   Paper,
@@ -49,6 +50,10 @@ import SecurityIcon from '@mui/icons-material/Security';
 import { alpha } from '@mui/material/styles';
 import { LineChart } from '@mui/x-charts';
 import DnsIcon from '@mui/icons-material/Dns';
+import RouterIcon from '@mui/icons-material/Router';
+import StorageIcon from '@mui/icons-material/Storage';
+import LanguageIcon from '@mui/icons-material/Language';
+import PublicIcon from '@mui/icons-material/Public';
 
 const StyledGrid = styled('div')(({ theme }) => ({
   display: 'grid',
@@ -133,7 +138,7 @@ function SiteDetails() {
 
   const fetchMetrics = useCallback(async () => {
     try {
-      const response = await axios.get(`http://localhost:5000/api/sites/${id}/metrics`);
+      const response = await axios.get(api.sites.metrics(id));
       if (response.data && response.data.responseTimeData) {
         setMetrics(response.data);
       }
@@ -144,7 +149,7 @@ function SiteDetails() {
 
   const fetchSite = useCallback(async () => {
     try {
-      const response = await axios.get(`http://localhost:5000/api/sites/${id}`);
+      const response = await axios.get(api.sites.get(id));
       setSite(response.data);
       setEditForm({
         name: response.data.name,
@@ -188,7 +193,7 @@ function SiteDetails() {
       if (isConnecting || isUnmounting) return;
       
       isConnecting = true;
-      ws = new WebSocket('ws://localhost:5000/ws');
+      ws = new WebSocket(api.websocket.connect());
 
       ws.onopen = () => {
         console.log('WebSocket conectado');
@@ -249,7 +254,7 @@ function SiteDetails() {
     try {
       setIsRefreshing(true);
       showInfo('Atualizando status do site...');
-      await axios.post(`http://localhost:5000/api/sites/${id}/check`);
+      await axios.post(api.sites.check(id));
       await fetchSite();
       showSuccess('Status do site atualizado com sucesso!');
     } catch (error) {
@@ -262,7 +267,7 @@ function SiteDetails() {
 
   const handleDelete = async () => {
     try {
-      await axios.delete(`http://localhost:5000/api/sites/${id}`);
+      await axios.delete(api.sites.delete(id));
       showSuccess('Site deletado com sucesso!');
       navigate('/');
     } catch (error) {
@@ -273,7 +278,7 @@ function SiteDetails() {
 
   const handleEdit = async () => {
     try {
-      await axios.put(`http://localhost:5000/api/sites/${id}`, editForm);
+      await axios.put(api.sites.update(id), editForm);
       setOpenEditDialog(false);
       showSuccess('Site atualizado com sucesso!');
       await fetchSite();
@@ -285,7 +290,7 @@ function SiteDetails() {
 
   const handleSettingsSave = async () => {
     try {
-      await axios.put(`http://localhost:5000/api/sites/${id}/notifications`, notificationSettings);
+      await axios.put(api.sites.notifications(id), notificationSettings);
       setOpenSettingsDialog(false);
       showSuccess('Configurações de notificação atualizadas com sucesso!');
       await fetchSite();
@@ -324,6 +329,25 @@ function SiteDetails() {
       return 'Não disponível';
     }
     return `${info.daysRemaining} dias restantes`;
+  };
+
+  const handleCheckPorts = async () => {
+    try {
+      showInfo('Verificando portas...');
+      const response = await axios.post(api.sites.checkPorts(id));
+      setSite(prevSite => ({
+        ...prevSite,
+        ipInfo: {
+          ...(prevSite.ipInfo || {}),
+          ports: response.data.ports,
+          lastPortCheck: new Date().toISOString()
+        }
+      }));
+      showSuccess('Portas verificadas com sucesso!');
+    } catch (error) {
+      console.error('Erro ao verificar portas:', error);
+      showError('Erro ao verificar portas');
+    }
   };
 
   if (loading) {
@@ -379,7 +403,7 @@ function SiteDetails() {
         </Button>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
           <Typography variant={isSmallScreen ? "h5" : "h4"} component="h1">
-            {site.name}
+            {site.name} {site.type === 'ip' ? '(IP)' : '(Site)'}
           </Typography>
           <Chip
             label={site.category}
@@ -400,7 +424,7 @@ function SiteDetails() {
         <StyledGridItem>
           <ResponsiveCard>
             <CardHeader 
-              title="Status do Site"
+              title={site.type === 'ip' ? "Status do IP" : "Status do Site"}
               titleTypography={{ variant: isSmallScreen ? 'h6' : 'h5' }}
             />
             <CardContent>
@@ -417,11 +441,23 @@ function SiteDetails() {
               {site.responseTime && (
                 <Box display="flex" justifyContent="space-between" alignItems="center">
                   <Typography variant="h6" gutterBottom>
-                    Tempo de Resposta
+                    {site.type === 'ip' ? 'Latência' : 'Tempo de Resposta'}
                   </Typography>
                   <Chip
                     label={`${site.responseTime}ms`}
                     color={getResponseTimeColor(site.responseTime)}
+                    sx={{ mr: 1 }}
+                  />
+                </Box>
+              )}
+              {site.type === 'ip' && site.ipInfo?.packetLoss !== undefined && (
+                <Box display="flex" justifyContent="space-between" alignItems="center">
+                  <Typography variant="h6" gutterBottom>
+                    Perda de Pacotes
+                  </Typography>
+                  <Chip
+                    label={`${site.ipInfo.packetLoss}%`}
+                    color={site.ipInfo.packetLoss > 0 ? 'warning' : 'success'}
                     sx={{ mr: 1 }}
                   />
                 </Box>
@@ -433,109 +469,215 @@ function SiteDetails() {
           </ResponsiveCard>
         </StyledGridItem>
 
-        <StyledGridItem>
-          <ResponsiveCard>
-            <CardHeader 
-              title="Certificado SSL"
-              titleTypography={{ variant: isSmallScreen ? 'h6' : 'h5' }}
-            />
-            <CardContent>
-              <Box display="flex" justifyContent="space-between" alignItems="center">
-                <Typography variant="h6" gutterBottom>
-                  Certificado SSL
-                </Typography>
-                {site.sslInfo && (
-                  <Chip
-                    label={getDaysRemaining(site.sslInfo)}
-                    color={site.sslInfo.daysRemaining <= 30 ? 'warning' : 'success'}
-                    size="small"
-                  />
-                )}
-              </Box>
-              {site.sslInfo ? (
-                <>
-                  <Typography variant="body2" color="textSecondary">
-                    Válido até: {formatDate(site.sslInfo.validTo)}
-                  </Typography>
-                  <Typography variant="body2" color="textSecondary">
-                    Emissor: {site.sslInfo.issuer || 'Não disponível'}
-                  </Typography>
-                </>
-              ) : (
-                <Alert severity="error" sx={{ mt: 1 }}>
-                  Informações SSL não disponíveis
-                </Alert>
-              )}
-            </CardContent>
-          </ResponsiveCard>
-        </StyledGridItem>
-
-        <StyledGridItem>
-          <ResponsiveCard>
-            <CardHeader 
-              title="Informações do Domínio"
-              titleTypography={{ variant: isSmallScreen ? 'h6' : 'h5' }}
-            />
-            <CardContent>
-              <Box display="flex" justifyContent="space-between" alignItems="center">
-                <Typography variant="h6" gutterBottom>
-                  Informações do Domínio
-                </Typography>
-                {site.domainInfo && (
-                  <Chip
-                    label={getDaysRemaining(site.domainInfo)}
-                    color={site.domainInfo.daysRemaining <= 30 ? 'warning' : 'success'}
-                    size="small"
-                  />
-                )}
-              </Box>
-              {site.domainInfo ? (
-                <>
-                  <Typography variant="body2" color="textSecondary">
-                    Expira em: {formatDate(site.domainInfo.expiryDate)}
-                  </Typography>
-                  <Typography variant="body2" color="textSecondary">
-                    Registrador: {site.domainInfo.registrar || 'Não disponível'}
-                  </Typography>
-                  <Typography variant="body2" color="textSecondary">
-                    Proprietário: {site.domainInfo.owner || 'Não disponível'}
-                  </Typography>
-                  <Typography variant="body2" color="textSecondary">
-                    Email: {site.domainInfo.email || 'Não disponível'}
-                  </Typography>
-                  <Typography variant="body2" color="textSecondary">
-                    País: {site.domainInfo.country || 'Não disponível'}
-                  </Typography>
-                  <Typography variant="body2" color="textSecondary">
-                    Criado em: {formatDate(site.domainInfo.creationDate)}
-                  </Typography>
-                  <Typography variant="body2" color="textSecondary">
-                    Última atualização: {formatDate(site.domainInfo.updatedDate)}
-                  </Typography>
-                  <Divider sx={{ my: 2 }} />
-                  <Typography variant="subtitle2" gutterBottom>
-                    Nameservers:
-                  </Typography>
-                  {Array.isArray(site.domainInfo.nameservers) ? (
-                    site.domainInfo.nameservers.map((ns, index) => (
-                      <Typography key={index} variant="body2" color="textSecondary">
-                        • {ns}
-                      </Typography>
-                    ))
-                  ) : (
-                    <Typography variant="body2" color="textSecondary">
-                      Não disponível
+        {site.type === 'ip' && (
+          <StyledGridItem>
+            <ResponsiveCard>
+              <CardHeader 
+                title="Informações do IP"
+                titleTypography={{ variant: isSmallScreen ? 'h6' : 'h5' }}
+                avatar={<PublicIcon />}
+              />
+              <CardContent>
+                {site.ipInfo ? (
+                  <Box>
+                    <Typography variant="body1" gutterBottom>
+                      <strong>IP:</strong> {site.url}
                     </Typography>
+                    {site.ipInfo.country && (
+                      <Typography variant="body1" gutterBottom>
+                        <strong>País:</strong> {site.ipInfo.country} ({site.ipInfo.countryCode})
+                      </Typography>
+                    )}
+                    {site.ipInfo.city && (
+                      <Typography variant="body1" gutterBottom>
+                        <strong>Localização:</strong> {site.ipInfo.city}, {site.ipInfo.regionName}
+                      </Typography>
+                    )}
+                    {site.ipInfo.isp && (
+                      <Typography variant="body1" gutterBottom>
+                        <strong>ISP:</strong> {site.ipInfo.isp}
+                      </Typography>
+                    )}
+                    {site.ipInfo.org && (
+                      <Typography variant="body1" gutterBottom>
+                        <strong>Organização:</strong> {site.ipInfo.org}
+                      </Typography>
+                    )}
+                    {site.ipInfo.reverseDns && (
+                      <Typography variant="body1" gutterBottom>
+                        <strong>DNS Reverso:</strong> {site.ipInfo.reverseDns}
+                      </Typography>
+                    )}
+                  </Box>
+                ) : (
+                  <Alert severity="info">
+                    Informações do IP não disponíveis
+                  </Alert>
+                )}
+              </CardContent>
+            </ResponsiveCard>
+          </StyledGridItem>
+        )}
+
+        {site.type === 'ip' && (
+          <StyledGridItem>
+            <ResponsiveCard>
+              <CardHeader 
+                title="Portas"
+                titleTypography={{ variant: isSmallScreen ? 'h6' : 'h5' }}
+                avatar={<RouterIcon />}
+                action={
+                  <Tooltip title="Verificar portas">
+                    <IconButton onClick={handleCheckPorts}>
+                      <RefreshIcon />
+                    </IconButton>
+                  </Tooltip>
+                }
+              />
+              <CardContent>
+                {site.ipInfo?.ports ? (
+                  <Box>
+                    <Typography variant="body2" color="textSecondary" gutterBottom>
+                      Última verificação: {new Date(site.ipInfo.lastPortCheck || site.lastCheck).toLocaleString()}
+                    </Typography>
+                    <Box sx={{ mt: 2, display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                      {Object.entries(site.ipInfo.ports).map(([port, info]) => (
+                        <Chip
+                          key={port}
+                          label={`${port}: ${info.status}`}
+                          color={info.status === 'open' ? 'success' : 'default'}
+                          size="small"
+                          sx={{ m: 0.5 }}
+                        />
+                      ))}
+                    </Box>
+                  </Box>
+                ) : (
+                  <Box>
+                    <Alert severity="info" sx={{ mb: 2 }}>
+                      Informações de portas não disponíveis
+                    </Alert>
+                    <Button 
+                      variant="outlined" 
+                      startIcon={<RefreshIcon />}
+                      onClick={handleCheckPorts}
+                    >
+                      Verificar Portas
+                    </Button>
+                  </Box>
+                )}
+              </CardContent>
+            </ResponsiveCard>
+          </StyledGridItem>
+        )}
+
+        {site.type !== 'ip' && (
+          <>
+            <StyledGridItem>
+              <ResponsiveCard>
+                <CardHeader 
+                  title="Certificado SSL"
+                  titleTypography={{ variant: isSmallScreen ? 'h6' : 'h5' }}
+                />
+                <CardContent>
+                  <Box display="flex" justifyContent="space-between" alignItems="center">
+                    <Typography variant="h6" gutterBottom>
+                      Certificado SSL
+                    </Typography>
+                    {site.sslInfo && (
+                      <Chip
+                        label={getDaysRemaining(site.sslInfo)}
+                        color={site.sslInfo.daysRemaining <= 30 ? 'warning' : 'success'}
+                        size="small"
+                      />
+                    )}
+                  </Box>
+                  {site.sslInfo ? (
+                    <>
+                      <Typography variant="body2" color="textSecondary">
+                        Válido até: {formatDate(site.sslInfo.validTo)}
+                      </Typography>
+                      <Typography variant="body2" color="textSecondary">
+                        Emissor: {site.sslInfo.issuer || 'Não disponível'}
+                      </Typography>
+                    </>
+                  ) : (
+                    <Alert severity="error" sx={{ mt: 1 }}>
+                      Informações SSL não disponíveis
+                    </Alert>
                   )}
-                </>
-              ) : (
-                <Alert severity="error" sx={{ mt: 1 }}>
-                  Informações do domínio não disponíveis
-                </Alert>
-              )}
-            </CardContent>
-          </ResponsiveCard>
-        </StyledGridItem>
+                </CardContent>
+              </ResponsiveCard>
+            </StyledGridItem>
+            
+            <StyledGridItem>
+              <ResponsiveCard>
+                <CardHeader 
+                  title="Informações do Domínio"
+                  titleTypography={{ variant: isSmallScreen ? 'h6' : 'h5' }}
+                />
+                <CardContent>
+                  <Box display="flex" justifyContent="space-between" alignItems="center">
+                    <Typography variant="h6" gutterBottom>
+                      Informações do Domínio
+                    </Typography>
+                    {site.domainInfo && (
+                      <Chip
+                        label={getDaysRemaining(site.domainInfo)}
+                        color={site.domainInfo.daysRemaining <= 30 ? 'warning' : 'success'}
+                        size="small"
+                      />
+                    )}
+                  </Box>
+                  {site.domainInfo ? (
+                    <>
+                      <Typography variant="body2" color="textSecondary">
+                        Expira em: {formatDate(site.domainInfo.expiryDate)}
+                      </Typography>
+                      <Typography variant="body2" color="textSecondary">
+                        Registrador: {site.domainInfo.registrar || 'Não disponível'}
+                      </Typography>
+                      <Typography variant="body2" color="textSecondary">
+                        Proprietário: {site.domainInfo.owner || 'Não disponível'}
+                      </Typography>
+                      <Typography variant="body2" color="textSecondary">
+                        Email: {site.domainInfo.email || 'Não disponível'}
+                      </Typography>
+                      <Typography variant="body2" color="textSecondary">
+                        País: {site.domainInfo.country || 'Não disponível'}
+                      </Typography>
+                      <Typography variant="body2" color="textSecondary">
+                        Criado em: {formatDate(site.domainInfo.creationDate)}
+                      </Typography>
+                      <Typography variant="body2" color="textSecondary">
+                        Última atualização: {formatDate(site.domainInfo.updatedDate)}
+                      </Typography>
+                      <Divider sx={{ my: 2 }} />
+                      <Typography variant="subtitle2" gutterBottom>
+                        Nameservers:
+                      </Typography>
+                      {Array.isArray(site.domainInfo.nameservers) ? (
+                        site.domainInfo.nameservers.map((ns, index) => (
+                          <Typography key={index} variant="body2" color="textSecondary">
+                            • {ns}
+                          </Typography>
+                        ))
+                      ) : (
+                        <Typography variant="body2" color="textSecondary">
+                          Não disponível
+                        </Typography>
+                      )}
+                    </>
+                  ) : (
+                    <Alert severity="error" sx={{ mt: 1 }}>
+                      Informações do domínio não disponíveis
+                    </Alert>
+                  )}
+                </CardContent>
+              </ResponsiveCard>
+            </StyledGridItem>
+          </>
+        )}
 
         <StyledGridItem>
           <ResponsiveCard>
