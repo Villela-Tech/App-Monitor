@@ -13,7 +13,7 @@ let monitorService = null;
 
 // Middleware
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://172.16.105.12:3000', 'http://localhost:5000', 'http://172.16.105.12:5000'], // Frontend URLs
+  origin: ['http://localhost:3000', 'http://8.242.76.156:3000', 'http://localhost:5000', 'http://8.242.76.156:5000'], // Frontend URLs
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   credentials: true
 }));

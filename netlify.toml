@@ -1,10 +1,9 @@
 [build]
-  base = "frontend"
   command = "npm run build"
   publish = "build"
 
 [build.environment]
-  REACT_APP_API_URL = "http://172.16.105.12:5000"
+REACT_APP_API_URL = "http://8.242.76.156:5000"
 
 [[redirects]]
   from = "/*"
@@ -13,7 +12,6 @@
 
 [[redirects]]
   from = "/api/*"
-  to = "http://172.16.105.12:5000/api/:splat"
+  to = "http://8.242.76.156:5000/api/:splat"
   status = 200
-  force = true
-  headers = {X-From = "Netlify"} 
+  force = true 
